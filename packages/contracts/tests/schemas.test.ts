@@ -50,9 +50,81 @@ describe("HouseEvent / Message 必须携带语境", () => {
       messageSchema.safeParse({
         id: "msg_1",
         conversation_id: "conv_1",
+        conversation_kind: "house_chat",
         sender: { type: "user" },
         content: "hello",
         created_at: "2026-07-17T12:00:00Z",
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("Message / HouseEvent 的语境组合校验（schema 内置，不靠调用方自觉）", () => {
+  const baseMessage = {
+    id: "msg_1",
+    conversation_id: "conv_1",
+    conversation_kind: "house_chat",
+    sender: { type: "user" },
+    content: "hello",
+    context: { context_type: "out_of_world", set_by: "server" },
+    created_at: "2026-07-17T12:00:00Z",
+  } as const;
+
+  it("house_chat + out_of_world + world_id 被 Message schema 拒绝", () => {
+    expect(
+      messageSchema.safeParse({
+        ...baseMessage,
+        context: { context_type: "out_of_world", world_id: "w1", set_by: "server" },
+      }).success
+    ).toBe(false);
+    expect(messageSchema.safeParse(baseMessage).success).toBe(true);
+  });
+
+  it("game_discussion 例外：out_of_world 可带 world_id", () => {
+    expect(
+      messageSchema.safeParse({
+        ...baseMessage,
+        conversation_kind: "game_discussion",
+        context: { context_type: "out_of_world", world_id: "w1", set_by: "server" },
+      }).success
+    ).toBe(true);
+  });
+
+  it("in_world 消息只许出现在 game_world 对话", () => {
+    const inWorld = {
+      context_type: "in_world",
+      world_id: "w1",
+      session_id: "s1",
+      branch_id: "b1",
+      set_by: "server",
+    } as const;
+    expect(
+      messageSchema.safeParse({ ...baseMessage, context: inWorld }).success
+    ).toBe(false);
+    expect(
+      messageSchema.safeParse({
+        ...baseMessage,
+        conversation_kind: "game_world",
+        context: inWorld,
+      }).success
+    ).toBe(true);
+  });
+
+  it("house_chat + out_of_world + world_id 被 HouseEvent schema 拒绝", () => {
+    const baseEvent = {
+      id: "ev_1",
+      type: "scene_entered",
+      actor: { type: "ai", ai_id: "jasper" },
+      payload: { scene_id: "game_room" },
+      conversation_kind: "house_chat",
+      context: { context_type: "out_of_world", set_by: "server" },
+      created_at: "2026-07-17T12:00:00Z",
+    } as const;
+    expect(houseEventSchema.safeParse(baseEvent).success).toBe(true);
+    expect(
+      houseEventSchema.safeParse({
+        ...baseEvent,
+        context: { context_type: "out_of_world", world_id: "w1", set_by: "server" },
       }).success
     ).toBe(false);
   });

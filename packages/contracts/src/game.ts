@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { proposalStatusSchema } from "./enums.js";
 
 /**
  * 游戏室骨架 schema——本期只建 schema 不开发功能（施工单附录）。
@@ -72,6 +73,77 @@ export const storyBranchSchema = z.object({
   created_at: z.string().datetime(),
 });
 export type StoryBranch = z.infer<typeof storyBranchSchema>;
+
+/** worldState 的五个顶层键（围栏一）。patch path 只允许落在这五棵树下。 */
+export const WORLD_STATE_TOP_KEYS = [
+  "characters",
+  "locations",
+  "items",
+  "threads",
+  "rules",
+] as const;
+
+const worldPatchPathPattern = new RegExp(
+  `^/(${WORLD_STATE_TOP_KEYS.join("|")})(/|$)`
+);
+
+/**
+ * 世界状态的单个受限变更操作（JSON patch 式）。
+ * 禁止模型整篇重写世界 JSON——少写一个角色 = 无声灭世。
+ */
+export const worldPatchOpSchema = z
+  .object({
+    op: z.enum(["add", "replace", "remove"]),
+    /** JSON pointer，必须落在 WORLD_STATE_TOP_KEYS 五棵树下。 */
+    path: z.string(),
+    value: z.unknown().optional(),
+  })
+  .superRefine((patch, ctx) => {
+    if (!worldPatchPathPattern.test(patch.path)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `patch path 只允许落在 ${WORLD_STATE_TOP_KEYS.join("/")} 五棵树下（收到 ${patch.path}）`,
+        path: ["path"],
+      });
+    }
+    if (patch.op !== "remove" && patch.value === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `op=${patch.op} 必须携带 value`,
+        path: ["value"],
+      });
+    }
+    if (patch.op === "remove" && patch.value !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "op=remove 不得携带 value",
+        path: ["value"],
+      });
+    }
+  });
+export type WorldPatchOp = z.infer<typeof worldPatchOpSchema>;
+
+/**
+ * 对世界 canon 的结构化变更提案，服务端校验后应用。
+ *
+ * 🔩 钉子 #5（乐观锁）：必带 base_snapshot_id + base_version，服务端仅在
+ * 当前版本一致时应用，否则拒绝或要求重新生成——防止两个 AI 同时基于
+ * 版本 18 改世界，后提交者静默覆盖前者，造出量子香蕉。
+ */
+export const worldChangeProposalSchema = z.object({
+  id: z.string(),
+  world_id: z.string(),
+  session_id: z.string().optional(),
+  proposer_ai_id: z.string(),
+  base_snapshot_id: z.string(),
+  base_version: z.number().int().nonnegative(),
+  ops: z.array(worldPatchOpSchema).min(1),
+  /** 给人看的变更说明，不是数据源。 */
+  description: z.string().optional(),
+  status: proposalStatusSchema,
+  created_at: z.string().datetime(),
+});
+export type WorldChangeProposal = z.infer<typeof worldChangeProposalSchema>;
 
 /**
  * 场外讨论（MetaConversation）：AI 恢复本体身份，不推进世界时间，不改 canon。

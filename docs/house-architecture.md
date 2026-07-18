@@ -53,7 +53,7 @@ Memory Hub Core        Tool Gateway
 
 scene（对话发生在哪、什么气氛、什么 prompt）和 memory domain（内容属于职业/健康/关系/偏好）是两套分类，**不做一对一绑定**：
 
-- `conversation.scene_id / participants / prompt_profile`
+- `conversation.kind / scene_id / participant_ai_ids`（prompt 审计由 `message.prompt_snapshot` 按生成时机承担；场景→prompt 映射在 scene 配置中，Conversation 不重复挂 prompt 字段）
 - `memory.primary_room / scene_id / participants / source_conversation_id`
 
 场景只提供分类**先验权重**（如心理咨询室：psychology +0.35），不决定分类。主题分类 = 规则优先 + 小模型提案 + 场景先验。场景信息永远单独保存。
@@ -123,7 +123,7 @@ Lamplight 拥有：scenes, conversations, messages, house_events, presence,
 
 ## 6. 事实状态与历史事件分开
 
-- `ai_presence`：现在是什么（current_room_id / activity / expires_at）
+- `ai_presence`：现在是什么（`scene_id` 可空 / `state: active|idle|away` / `updated_at`）。**过期判定是服务端规则**：`updated_at` 超时即视为 idle，不在 schema 里加 expires_at 字段。注意 presence 定位用的是 `scene_id`（空间场景），不是 memory room——presence 表里出现「room」字样即违反 §3 解耦
 - `house_events`：发生过什么（结构化 payload 是唯一数据源，description 仅供展示）
 
 纯事件回放会让两小时前进厨房、没有离开事件的 AI 永远困在厨房。挺像小克会干的事，但程序不能耍赖。
@@ -145,7 +145,7 @@ Pulse → ActionProposal → Policy Engine → 自动执行/等待批准/拒绝 
 3. 世界允许多次 `Session`，回到旧世界 = 新建 Session
 4. 支持 `Branch` 与存档点；分支引用快照，不复制世界
 5. **游戏剧情与现实记忆严格隔离**——世界 canon 不是用户事实
-6. in_world 只进世界 lore，管线强制执行，不靠 prompt 嘱咐
+6. in_world 只进世界 lore，管线强制执行，不靠 prompt 嘱咐。**唯一例外**：玩法偏好/体验反馈类「游戏体验记忆」可经 MemoryProposal 候选区进 Hub，至少按 observation 待遇，不许自动通过（domain 的 triage 已按此实现）
 7. 场外讨论是 `GameDiscussion`：AI 恢复本体，不推进世界时间，不改 canon；结果经「应用到游戏」才生效
 8. canon 修改走 `WorldChangeProposal`：JSON patch 式 ops + **base_snapshot_id/base_version 乐观锁**；worldState 限五顶层键（characters/locations/items/threads/rules），patch path 不许出界；禁止整篇重写世界 JSON
 9. 世界状态、世界年表、设定年轮、摘要、原始对话分开存；重开旧世界走服务端「回归包」

@@ -12,8 +12,11 @@
 
 ## 技术约定
 
-- 技术栈：React + Vite，与 memory-hub 前端一致
-- 数据一律来自 memory-hub 的 API，本仓库不直连数据库、不存业务数据
+- 技术栈：pnpm monorepo；前端 React + Vite（apps/web），BFF（apps/api）
+  与后台工人（apps/worker）也归本仓库
+- 数据形状一律以 packages/contracts 为准；前端只跟 House API 说话，
+  不持密钥、不直连 MCP/Hub；本仓库不得直接 SELECT Hub 核心表
+  （归属边界见 docs/house-architecture.md §5）
 - 密钥/地址等配置只放环境变量（`.env` 已 gitignore），代码里永不硬编码
 - 家具/房间是数据驱动的 SVG 组件：AI 只输出结构化 JSON（选型+参数），
   绘画资产由人工维护在组件库里

@@ -23,6 +23,20 @@ describe("MemoryProposal", () => {
     expect(memoryProposalSchema.safeParse(base).success).toBe(true);
   });
 
+  it("sensitivity.allowed_ai_ids 留 nullable，缺省解析为 null（v2 §4）", () => {
+    const parsed = memoryProposalSchema.parse(base);
+    expect(parsed.sensitivity.allowed_ai_ids).toBeNull();
+    const withList = memoryProposalSchema.parse({
+      ...base,
+      sensitivity: {
+        visibility: "private",
+        recall_policy: "manual_only",
+        allowed_ai_ids: ["cloudy"],
+      },
+    });
+    expect(withList.sensitivity.allowed_ai_ids).toEqual(["cloudy"]);
+  });
+
   it("claim_type 只接受 fact/observation/hypothesis", () => {
     expect(
       memoryProposalSchema.safeParse({ ...base, claim_type: "guess" }).success

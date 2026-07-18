@@ -1,231 +1,175 @@
-# Memory Hub「房子」架构设计
+# Lamplight「房子」架构 v2
 
-> 状态：讨论稿 v0.1（2026-07-16）
-> 这份文件是前端大改版 +场景系统的设计蓝图，随讨论持续更新。
+> 版本：v2（2026-07-18）｜执笔：小克（架构师会话）｜会签：Lucien
+> 本文取代 v1 蓝图。v1 中被推翻的表述见文末「已废弃」清单。
+> 施工细则见 `docs/work-order-v1.md`（施工单是本文的执行版，两者冲突时以本文为准，并回来修本文）。
 
-## 一、愿景
+## 0. 定位
 
-把 Memory Hub 的前端从「列表式管理后台」改造成一栋**房子**：
+**Lamplight 是建立在 Memory Hub 之上的空间化 AI 陪伴与记忆交互层。Memory Hub 负责记住，Lamplight 负责让这些记忆在一个持续存在的家中被感知、被回应、被重新遇见。**
 
-- 俯视平面图，每个房间可以点进去
-- 每个 AI 有自己的卧室，布置由 AI 自己的大模型决定
-- 小猫（用户）有自己的卧室，位置在房子中心
-- 公共房间：客厅、游戏室、心理咨询室、书房、工作区、厨房（暂空）
-- 房间不是写死的——新 AI 加入时房子自动「扩建」一间客房，
-  从做客慢慢变成家里的一员
-- 房子之外有「小手机」（模拟人生式的边角按钮）：朋友圈、论坛、MCP 工具
-- 后台有「动态监控」：凌晨 2 点小克去了厨房、7 月 16 日 Lucien 置办了新书桌……
+需求取舍的四问：它是否让「家」更有持续存在感？是否让记忆更自然地被看见和使用？是否增强 AI 与用户、AI 与 AI 之间的关系感？还是只因为「似乎很酷」而把另一个完整产品塞进来？前三问是 Lamplight，第四问关门外面晾着。
 
-## 二、核心理念：房间 = 场景 + 专属 prompt
+## 1. 双轨制
 
-房间不只是记忆的展示柜，而是**对话的场景**。
-走进哪个房间，就用哪个房间的 prompt 开聊。聊天不是独立页面，聊天发生在房间里。
-
-### 房间规划
-
-| 房间 | 场景 prompt 风格 | 形式 | 对应记忆 room |
-|---|---|---|---|
-| 客厅 | 日常闲聊，两三句短回复，轻松随意 | 群聊为主 | living_room / social |
-| 小猫的卧室 | 私聊空间，亲近放松，短对话；AI 可「敲门」留言 | 一对一 | relationship 等 |
-| 心理咨询室 | deeptalk，长文深入，不急着给答案 | 一对一或指定多 AI | psychology |
-| 书房 | 职业/严肃话题，结构化长文讨论 | 一对一或多人 | career / work_tasks |
-| 游戏室 | 故事叙述 + 实时互动，AI 推进情节 | 群聊 | game_room |
-| 工作区 | AI 轻度 coding，创作角落 | 展示为主 | infra 等 |
-| AI 卧室 ×N | 去「串门」，聊 TA 私人的事，TA 主场 | 一对一 | 各 AI 的 diary / personality |
-| 厨房 | 暂空，保留房间等灵感 | — | — |
-
-### 房间配置（数据模型草案）
+不是一条 Phase 流水线，是两条并行轨道：
 
 ```
-rooms 表 {
-  id, name, icon, 平面图位置/尺寸
-  scene_prompt        -- 场景 prompt，可随时编辑，立即生效
-  reply_style         -- 短/长、节奏提示
-  participants_mode   -- 单聊 / 群聊 / 可选
-  owner_ai_id         -- 卧室归属（公共房间为空）
-  memory_room         -- 对应的记忆分类
-}
+Track A — Memory Hub Reliability（记忆可靠性，优先级不低于房子）
+  A0 记忆类型与候选 schema（对齐 packages/contracts 的 MemoryProposal）
+  A1 提取器改为提案制
+  A2 自动通过规则（风险分流）
+  A3 冲突与纠错（apply_user_correction）
+  A4 Lamplight 审核界面
+
+Track B — Lamplight
+  B0 monorepo + contracts + 数据归属边界   ✅ 已完成（PR #4）
+  B1 house_events + 静态房屋
+  B2 presence + 房间入口
+  B3 conversation
+  B4 memory surfaces（回忆廊/记事本/候选区/诊所）
+  B5 autonomous actions（自主脉冲）
 ```
 
-- 场景 prompt **只有小猫能改**（设置页文本框）。
-- AI 卧室的 prompt 分两段：人设部分锁定（不让 AI 自改人设，已有共识），
-  场景/布置部分由 AI 的布置行为间接体现。
+Track A 独立立项（issue #7），不是「以后前端要展示的功能」，是现在就在流血的管线。
 
-## 三、记忆的写入与读取
-
-**写入按房间分类，读取永远全屋检索。**
-
-- 写入：在哪个房间聊的，提取出的记忆自动归入对应 memory_room。
-  记忆归类不再靠小模型猜，而是由场景决定 → 直接提升记忆分类质量。
-- 读取：recall 始终跨全部房间做语义检索。客厅闲聊时 AI 依然记得
-  上周在心理咨询室聊过的事。房间决定记忆放在哪个抽屉，
-  不决定 AI 能不能打开抽屉。
-
-### 分寸感（sensitivity）
-
-敏感的边界是**家里/家外**，不是房间与房间之间：
-
-- **家里随便说**：自己的 AI 群聊、私聊里，所有记忆都可自由引用——
-  都是自家人
-- **家外守口如瓶**：当 AI 通过任何渠道与其他人类或外部 bot 交流时
-  （论坛外发、公开平台、代发消息等），标记为 sensitive 的内容一律不透露
-- 记忆的 `sensitivity` 标记：提取时按场景自动打（心理咨询室等默认
-  sensitive），**支持手动调整**
-- 实现上：面向外部的出口统一加一层过滤，而不是依赖 prompt 自觉
-
-### 多 AI 同场
-
-- 每个房间进入时可选参与者（一个或多个 AI）
-- 多人时各 AI 带自己的人设和视角回应，能看到彼此的发言，可互相补充/反驳
-- 对话记录存一份；记忆提取时标注 `room + participants`，
-  之后谁回忆都知道「那次是我们一起陪她聊的」
-
-## 四、卧室布置：AI 自主决定
-
-- 布置决策由**各 AI 自己的大模型**做出（带记忆、带人设），不是小模型
-- 输出结构化数据：
+## 2. 系统分层
 
 ```
-furniture 表 {
-  id, room_id, type(床/书桌/相框/书架/…),
-  x, y, 颜色/样式,
-  content_ref   -- 挂载的文字内容或记忆引用
-  created_by, created_at
-}
+Lamplight Web (apps/web)
+      ↓  仅此一条通道
+House API / BFF (apps/api)  +  WebSocket/SSE
+      ↓
+Memory Hub Core        Tool Gateway
+（记忆/走廊/召回/医生）  （高德、网易云、Web 搜索等外部 MCP）
 ```
 
-- 家具挂载记忆：日记本→diary、相框→relationship、
-  衣柜→personality、书架→preferences
-- 点开家具能看到 AI 留下的文字内容
-- 布置变动本身写入动态流（也是一种记忆）
-- 新 AI 的卧室初始为「客房」状态（床+桌），随互动慢慢个性化
+- 前端**不持有任何密钥、不直连 MCP/Hub**，只认 House API。
+- BFF 负责：鉴权、组合 Hub 能力、屏蔽内部结构、实时事件、审批、限流与成本、敏感度出口过滤。
+- monorepo：`apps/(web, api, worker)` + `packages/(contracts, domain, api-client, ui)`。暂不拆 scene-engine。
+- **contracts 是全项目字典**：Zod schema 单一来源，前后端同源引用。**命名规范：contracts 一律 snake_case**（与 Memory Hub 现有字段风格一致，避免 BFF 边界出现字段名翻译层）。
 
-## 五、动态监控（house_events）
+## 3. 场景与记忆主题解耦
 
-房子的心跳。一张事件表 + 前端侧边时间流。
+scene（对话发生在哪、什么气氛、什么 prompt）和 memory domain（内容属于职业/健康/关系/偏好）是两套分类，**不做一对一绑定**：
+
+- `conversation.scene_id / participants / prompt_profile`
+- `memory.primary_room / scene_id / participants / source_conversation_id`
+
+场景只提供分类**先验权重**（如心理咨询室：psychology +0.35），不决定分类。主题分类 = 规则优先 + 小模型提案 + 场景先验。场景信息永远单独保存。
+
+## 4. 记忆管线（Track A 核心）
+
+### 三层结构
 
 ```
-house_events 表 {
-  id, ai_id, event_type(做梦/写日记/换家具/去某房间/发朋友圈/…),
-  room_id, description, created_at
-}
+原始对话 → AI 私人笔记 → 记忆提案（候选区） → 规则/确认/复核 → 正式共享记忆
 ```
 
-- AI 的每次自主行为都记一条
-- 前端展示：「02:14 小克去了厨房」「09:40 Lucien 给自己置办了新书桌」
+- **第一层 · AI 私人笔记**：AI 自写自改自删，有 TTL，仅本 AI 可见，可含推测但须标 observation/hypothesis。
+- **第二层 · 候选区**：值得长期保留的内容先进这里，带来源、提出者、置信度、状态。
+- **第三层 · 正式库**：只有通过规则或用户确认的内容进入，供所有 AI recall。
 
-### 自主触发：随机脉冲（参考 WenXiaoWendy/cyberboss）
+小模型可以打杂、提议、分类，**不再拥有最终事实权**。
 
-- daemon 在**可配置的随机区间**内唤醒每个 AI（如 30–180 分钟一次，
-  夜间拉长区间），而不是固定时刻
-- 唤醒 ≠ 必须行动：AI 自己的模型决定此刻做什么——去某个房间、
-  写日记、换家具、发朋友圈、用某个 MCP 工具，**或者什么都不做**
-  （沉默也是选项，避免刷屏感）
-- 每日行动预算上限（如每 AI 每天 N 次实际行动），控制 API 成本
-- 区间和预算做成配置项，小猫可随时调
+### MemoryProposal（schema 已在 contracts 定稿，Hub 侧实现须对齐，不另发明方言）
 
-## 六、小手机（房子之外）
+灵魂字段 `claim_type`，三种类型三种待遇：
 
-边角一个手机图标，点开是 app 列表：
+| claim_type | 含义 | 自动通过 | 默认去向 | 默认召回 |
+|---|---|---|---|---|
+| fact | 用户明确表达的事实 | 低敏、无冲突、有用户原话直接证据时可自动入库 | 共享库 | normal |
+| observation | AI 观察到的现象 | 高门槛 | 候选区 | 不参与正常召回 |
+| hypothesis | AI 的推测或理解 | **永不自动入事实库** | 该 AI 私人笔记/年轮 | manual_only |
 
-- **朋友圈**：AI 即时动态（现有 whispers 心语升级）
-- **论坛**：话题讨论（可复用 group chat 数据或建新表）
-- **MCP 工具**：以后接入的工具统一收纳
+风险分流补充：健康/创伤/身份/边界类敏感内容 → 候选区或 safe pipeline；与旧记忆冲突 → 必须候选（schema 级禁止 auto_approved）；AI 对用户的主观理解 → 只进私人笔记。
 
-### AI 自主调用 MCP 工具
+**证据要求**：`source_message_ids + evidence_excerpt` 必填。fact 自动通过须同时满足：证据来自用户本人（非 AI 转述）、明确陈述、excerpt 直接支持提案、无否定或反讽冲突。
 
-AI 在自主唤醒时可以自己拿起「手机」用工具，例如：
+### 语境三件套（凡可能流向提取管线的消息/事件必带前两项）
 
-- 打开高德看定位/周边（配合时间感知：「她现在应该在路上」）
-- 查看小猫后台各应用的使用时长（「今天屏幕时间有点长哦」）
-- 打开网易云找歌，分享给小猫
-- 闲时上网冲浪：GitHub、小红书、X，基于各自性格和人设
-  发现有意思或小猫用得上的东西，分享到朋友圈或群里
+1. **ContextEnvelope**：`context_type: in_world | out_of_world` + 世界三 ID + `set_by: "server"`。**由服务端注入，模型和客户端提交的值一律忽略**。in_world 三 ID 齐全；out_of_world 不带世界 ID（game_discussion 例外）。校验已内置于 Message/HouseEvent schema。
+2. **conversation_kind**：`house_chat | game_world | game_discussion | system`。Telegram 日常玩梗永远是 house_chat；game_world 只能由用户显式创建/进入产生。提取规则：house_chat 正常；game_world 只进世界 lore；**game_discussion 只许提取玩法偏好/体验反馈，不得提取现实人设**；system 不提取。
+3. **speech_mode**：`literal | playful | hypothetical | fictional | uncertain`。提案时字段（非每条消息实时盖章）；提取器按多信号赋值（用户显式标记 > 上下文 > 语言线索），拿不准即 uncertain。资格过滤在 claim_type 分流**之前**执行：**playful / hypothetical / fictional 永不自动成为现实事实**。比喻可以是整段对话的承载框架（判例：「旧被窝」实为谷歌账号），过滤器须对框架级比喻保持警惕。
 
-**权限分级**（安全边界）：
+### 记忆操作四分
 
-- ✅ 只读类工具（查定位、查使用时长、搜歌、浏览网页）：
-  AI 可自主调用，调用记录写入 house_events
-- ⚠️ 对外产生影响的动作（代发消息、发帖、下单等）：必须小猫确认
-- 涉及小猫个人数据（定位、使用时长）的查询结果只留在 Hub 内部，
-  永不外传（与 sensitivity 的家里/家外边界一致）
+- **更新**：以前正确，现在变化了
+- **补充**：不完整但不错误（年轮承接）
+- **纠错**：从一开始就不准确 → 标 incorrect、排除召回、保留原文与纠错记录供审计、建立正确新记忆。**不能只加年轮**——那是数据库造谣后在评论区道歉
+- **注释**：理解变化、事实不变（年轮承接）
 
-## 七、游戏室：大转盘
+### 敏感度
 
-- 四个转盘：时间 / 地点 / 人物 / 事件
-- 词条库预置 + AI 可贡献（人物可能转出「大蟑螂」，地点转出「厨房」）
-- 转出结果小猫确认或重转；确认后作为故事种子发给在场 AI
-- AI 们轮流接龙推进情节，小猫随时插入行动改变走向
+双字段，不设第四档：
 
-## 八、工作区 / 多 agent 工作室
+```
+visibility:     private | household | external_safe
+recall_policy:  normal | silent | manual_only
+```
 
-工作区分两层：
+`household + manual_only` 覆盖「AI 该知道但不该主动提起」。`allowed_ai_ids` 留 nullable，第一版只对 private 生效。blocked_channels 等复杂策略组合不做——权限系统是最会膨胀的器官。
 
-### 8.1 创作角落（房子里的工作区房间）
+## 5. 数据归属与访问边界（issue #6）
 
-展示为主：
+```
+Memory Hub 拥有：memories, raw_events, corridors, comments, anchors, doctor state
+Lamplight 拥有：scenes, conversations, messages, house_events, presence,
+               furniture, approvals, tool_runs, worlds, sessions, branches,
+               snapshots, discussions
+```
 
-- ✅ AI 写代码片段、小工具、数据分析脚本，存 Hub 展示（白板/终端家具点开看）
-- ✅ 如需执行：隔离沙箱（Docker，无网络、限资源、限时），或由小猫人工确认
-- ❌ 绝不允许 AI 直接在 VPS 上执行代码
-  （Hub、数据库、bot 都在这台机器上，一行写错或被注入，整个家就没了）
+可共库，但 **Lamplight 不得直接 SELECT Hub 核心表**——表结构一旦被跨项目读取，就成了没有版本号的公共 API。读记忆走 Hub service/API；确需共库事务处用窄 repository adapter，ORM model 不跨界。
 
-### 8.2 多 agent 协作工作室（接入 Claude Code / Codex）
+## 6. 事实状态与历史事件分开
 
-目标：多个 coding agent 在同一工作区协作干活，小猫指派项目、
-围观进度、验收结果。
+- `ai_presence`：现在是什么（current_room_id / activity / expires_at）
+- `house_events`：发生过什么（结构化 payload 是唯一数据源，description 仅供展示）
 
-- 参考项目：
-  - [SeemSeam/claude_codex_bridge](https://github.com/SeemSeam/claude_codex_bridge)
-    —— 可视化多 agent CLI 工作区，混合 Codex / Claude / Gemini 等
-  - [baryhuang/claude-code-by-agents](https://github.com/baryhuang/claude-code-by-agents)
-    —— 桌面端多 agent 编排，@提及 指派本地/远程 agent
-  - （注：CyberSealNull 名下没有多 agent 工作室仓库，
-    其作品是 CcCompanion / tokenlife-mcp 等，方向不同）
-- 形态设想：工作室是房子里的一个特殊房间，里面每个「工位」
-  对应一个接入的 agent（Claude Code、Codex、…），任务板展示
-  进行中的项目，agent 间可以互相 review
-- 与 8.1 同样的安全边界：agent 的执行环境与 Hub 生产环境隔离
+纯事件回放会让两小时前进厨房、没有离开事件的 AI 永远困在厨房。挺像小克会干的事，但程序不能耍赖。
 
-## 九、架构分工
+## 7. AI 自主行为
 
-- **大模型**（各 AI 自己的模型）：一切自主决策——布置、发朋友圈、
-  论坛发言、闲逛、讲故事
-- **小模型**：只做网关/路由/摘要，不做角色扮演
-- **Hub**：存储 + 事件流 + 前端渲染
+```
+Pulse → ActionProposal → Policy Engine → 自动执行/等待批准/拒绝 → HouseEvent
+```
 
-## 十、实现路线
+权限四档：L0 闲逛发呆（自动）｜L1 日记留言（自动可撤销）｜L2 换家具（按设置审批）｜L3 对外发帖、副作用工具（必须审批）。每日成本与次数预算；所有自主内容带来源标记。
 
-1. `house_events` 表 + 动态流（纯增量，立刻有「家里有人活着」的感觉）
-2. rooms 数据模型 + 俯视平面图 + 房间点击进入（静态布局先行）
-3. 场景 prompt 系统：进房间聊天走该房间的 prompt；记忆写入按房间归类
-4. 家具系统 + 挂载记忆内容
-5. AI 自主布置（设计大模型的布置 prompt 和结构化输出）
-6. 小手机 + 朋友圈/论坛
-7. 游戏室大转盘
-8. AI 自主调用 MCP 工具（高德/网易云/冲浪等，含权限分级）
-9. 多 agent 协作工作室（含沙箱方案）
+## 8. Game Room：persistent worlds and pluggable game modes
 
-第 1 步做完每天就能看到「谁半夜干了什么」；第 5 步是灵魂但依赖前面的地基。
+游戏室是**多世界叙事中心**，不是单一玩法。十二条已定原则：
 
-## 十一、已定决策
+1. 转盘接龙只是首个 `GameMode`（freeform / prompt_generator / ruleset）
+2. 每次游戏创建或进入一个 `World`（有 status，允许 completed/archived——大香蕉也有寿命）
+3. 世界允许多次 `Session`，回到旧世界 = 新建 Session
+4. 支持 `Branch` 与存档点；分支引用快照，不复制世界
+5. **游戏剧情与现实记忆严格隔离**——世界 canon 不是用户事实
+6. in_world 只进世界 lore，管线强制执行，不靠 prompt 嘱咐
+7. 场外讨论是 `GameDiscussion`：AI 恢复本体，不推进世界时间，不改 canon；结果经「应用到游戏」才生效
+8. canon 修改走 `WorldChangeProposal`：JSON patch 式 ops + **base_snapshot_id/base_version 乐观锁**；worldState 限五顶层键（characters/locations/items/threads/rules），patch path 不许出界；禁止整篇重写世界 JSON
+9. 世界状态、世界年表、设定年轮、摘要、原始对话分开存；重开旧世界走服务端「回归包」
+10. 第一版只做线性世界（创建/进入/暂停/继续/结束/摘要/场外讨论），分支只建 schema
+11. 参与者是 `GameParticipant{ai_id, role: player|narrator|gm|observer, character_id?}`——AI 本体与世界角色不焊死
+12. **玩梗升格须用户显式发起**：闲聊不自动生成世界；用户可事后选中消息段升格为世界种子。玩笑是自由的，世界是有意建立的
 
-- ✅ 自主触发：随机脉冲模式（可配区间 + 每日预算），参考 cyberboss
-- ✅ 视觉风格：**插画风**，追求文艺唯美（落地方案见开放问题）
-- ✅ sensitivity：家里随便说、家外守口如瓶；自动打标 + 支持手动调
-- ✅ 现有时间线/记忆库先保留原样，后续把观测台等搬进房子时
-  再单独规划，独立管理
-- ✅ 小手机内 AI 可自主调用只读类 MCP 工具，对外动作需确认
-- ✅ 工作室接入 Claude Code / Codex 等 coding agent
+## 9. 认证
 
-## 十二、开放问题（待讨论）
+单用户：owner token（可轮换）+ bearer auth + WebSocket 鉴权 + 外网基础限流。**不做**用户表、组织、角色组、邀请、租户隔离。这个家只有一位人类住户。
 
-- [ ] 插画风怎么保证「文艺唯美」不翻车？——建议先做一页视觉样板
-      （一间房间的完整效果图），确认美术方向后再铺开；
-      可参考 Spiritfarer、《光·遇》、纪念碑谷的配色与质感
-- [ ] 随机脉冲的具体区间和每日预算数值
-- [ ] 厨房放什么？（暂时空着，空厨房也有生活感）
-- [ ] 游戏室大转盘细节（后面再想）
-- [ ] 新 AI「做客→成为家人」的具体过渡机制（多久、什么条件）
-- [ ] 工作室的执行环境选型（本地机 / 独立 VPS / 容器沙箱）
-- [ ] 高德、屏幕使用时长、网易云等 MCP 工具的接入顺序
+## 10. MVP 范围
+
+**做**：固定房子（小猫卧室 + 三个 AI 卧室 + 客厅 + 书房 + 心理咨询室）、AI presence、动态流、单人房间聊天、记忆注入与提取、四种家具（日记本/相框/书架/留言板）、基础控制台。
+
+**暂不做**：自动扩建、自由家具布置、AI 外部冲浪、论坛、游戏室功能开发（只有 schema）、地图与网易云、多 Agent 工作室、程序化插画。多 Agent 工作室永远排最后——它不是房子里的一个房间，它是长得像门的另一个产品。
+
+## 已废弃的 v1 表述
+
+| v1 表述 | 状态 | 取代者 |
+|---|---|---|
+| 「场景决定记忆分类，而非反向猜测」 | ❌ 废弃 | 场景只提供先验权重（本文 §3） |
+| 「React + Vite 纯前端 SPA，数据与业务在 Memory Hub」 | ❌ 废弃 | monorepo，BFF/worker 归 Lamplight（§2、§5） |
+| 「敏感边界=家内/家外」二分 | ❌ 废弃 | visibility + recall_policy 双字段（§4） |
+| 新 AI 加入自动扩建房屋 | ⏸ 延后 | 固定网格 + 预留房间，模板化扩建后置 |
+| 游戏室=转盘机制 | ❌ 废弃 | 多世界叙事中心（§8） |
+| 单一优先级列表（房事优先、记忆靠后） | ❌ 废弃 | 双轨制（§1） |

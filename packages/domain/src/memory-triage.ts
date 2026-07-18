@@ -118,6 +118,19 @@ export function triageMemoryProposal(input: TriageInput): TriageDecision {
     return candidate("game_discussion 的玩法偏好/体验反馈进候选区");
   }
 
+  // ── 硬门：冲突 / 敏感（施工单：无论哪种 claim_type 都必须候选）──
+  // 压在一切"能落库"的出口（含 hypothesis 的私人笔记通道）之前，
+  // 只有 reject（完全不提取）可以先于它发生。
+  const hardGate = (): TriageDecision | null => {
+    if (proposal.conflicts_with && proposal.conflicts_with.length > 0) {
+      return candidate("与已有记忆冲突，必须人工裁决，不许静默覆盖");
+    }
+    if (isSensitive(proposal, input.force_sensitive)) {
+      return candidate("健康/创伤/身份/边界类敏感内容不许自动入库，进候选区/safe pipeline");
+    }
+    return null;
+  };
+
   // ── speechMode 资格过滤（在 claim_type 分流之前执行）──────
   switch (proposal.speech_mode) {
     case "playful":
@@ -126,7 +139,7 @@ export function triageMemoryProposal(input: TriageInput): TriageDecision {
       return { outcome: "reject", reason: "fictional 只在 game_world 中进入该世界 lore" };
     case "hypothetical":
       if (proposal.claim_type === "hypothesis") {
-        return privateNote("hypothetical 的关注点最多以 hypothesis 记录");
+        return hardGate() ?? privateNote("hypothetical 的关注点最多以 hypothesis 记录");
       }
       return { outcome: "reject", reason: "hypothetical 不提取事实" };
     case "uncertain":
@@ -136,17 +149,13 @@ export function triageMemoryProposal(input: TriageInput): TriageDecision {
   }
 
   // ── claim_type 三分流（钉子 #1 的三分表）──────────────────
+  const gated = hardGate();
+  if (gated) {
+    return gated;
+  }
   // hypothesis：无论其他条件如何，永不自动入事实库
   if (proposal.claim_type === "hypothesis") {
     return privateNote("hypothesis 永不自动入事实库，进该 AI 私人笔记/年轮");
-  }
-  // 与旧记忆冲突：必须候选，不许静默覆盖（对 fact/observation 一视同仁）
-  if (proposal.conflicts_with && proposal.conflicts_with.length > 0) {
-    return candidate("与已有记忆冲突，必须人工裁决，不许静默覆盖");
-  }
-  // 敏感内容：无论哪种类型都进候选区或 safe pipeline
-  if (isSensitive(proposal, input.force_sensitive)) {
-    return candidate("健康/创伤/身份/边界类敏感内容不许自动入库");
   }
   if (proposal.claim_type === "observation") {
     return candidate("observation 高门槛，默认进候选区，不参与正常召回");

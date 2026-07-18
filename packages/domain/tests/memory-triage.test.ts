@@ -102,6 +102,42 @@ describe("冲突记忆无法绕过候选区直接入库", () => {
   });
 });
 
+describe("回归（review 4727721304）：敏感/冲突硬门压在私人笔记通道之前", () => {
+  it("敏感 hypothesis → 候选区，不得绕道私人笔记", () => {
+    const d = triage({ claim_type: "hypothesis", proposed_room: "health" });
+    expect(d.outcome).toBe("candidate");
+  });
+
+  it("冲突 hypothesis → 候选区，不得绕道私人笔记", () => {
+    const d = triage({ claim_type: "hypothesis", conflicts_with: ["mem_old_1"] });
+    expect(d.outcome).toBe("candidate");
+  });
+
+  it("hypothetical + hypothesis 且敏感/冲突 → 候选区", () => {
+    expect(
+      triage({
+        speech_mode: "hypothetical",
+        claim_type: "hypothesis",
+        proposed_room: "psychology",
+      }).outcome
+    ).toBe("candidate");
+    expect(
+      triage({
+        speech_mode: "hypothetical",
+        claim_type: "hypothesis",
+        conflicts_with: ["mem_old_1"],
+      }).outcome
+    ).toBe("candidate");
+  });
+
+  it("无敏感无冲突时 hypothesis 仍走私人笔记（原路径不受影响）", () => {
+    expect(triage({ claim_type: "hypothesis" }).outcome).toBe("private_note");
+    expect(
+      triage({ speech_mode: "hypothetical", claim_type: "hypothesis" }).outcome
+    ).toBe("private_note");
+  });
+});
+
 describe("钉子 #4：fact 自动通过的证据关，缺一不可", () => {
   it.each([
     ["证据非用户本人（AI 转述冒充案底）", { ...goodEvidence, from_user: false }],

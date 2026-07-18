@@ -12,6 +12,12 @@ import {
 export const sensitivitySchema = z.object({
   visibility: visibilitySchema,
   recall_policy: recallPolicySchema,
+  /**
+   * 允许访问的 AI 白名单（house-architecture v2 §4）。
+   * 留 nullable（null = 不限制）；第一版只对 visibility=private 生效，
+   * 其他档位下服务端忽略该字段。
+   */
+  allowed_ai_ids: z.array(z.string()).nullable().default(null),
 });
 export type Sensitivity = z.infer<typeof sensitivitySchema>;
 

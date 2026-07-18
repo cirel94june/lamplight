@@ -1,3 +1,5 @@
+export * from "./memory-triage.js";
+
 /**
  * @lamplight/domain：领域类型和纯逻辑。
  * 房间、家具的定义先放这里；渲染细节归 apps/web，数据形状归 contracts。

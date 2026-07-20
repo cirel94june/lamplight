@@ -23,9 +23,9 @@ export const agentProfileSchema = z.object({
   /** Hub 侧记忆隔离范围（对应 Hub 的 memory scope / AI identity） */
   memory_scope: z.string().min(1),
   /** 指向工具权限配置 */
-  tool_policy_id: z.string().optional(),
+  tool_policy_id: z.string().min(1).optional(),
   /** 排查用：当前 prompt 模板版本号 */
-  prompt_version: z.string().optional(),
+  prompt_version: z.string().min(1).optional(),
 });
 export type AgentProfile = z.infer<typeof agentProfileSchema>;
 

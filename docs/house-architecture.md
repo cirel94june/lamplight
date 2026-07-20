@@ -1,7 +1,7 @@
 # Lamplight「房子」架构 v2
 
 > 版本：v2.1（2026-07-20）｜执笔：小克（架构师会话）｜会签：Lucien
-> v2.1 变更：新增 AI Gateway（§2）、Agent 身份与模型解耦（§2a）、Agent Runtime 与 Channel Adapter（§2b）
+> v2.1 变更：新增 AI Gateway（§2）、Agent 身份与模型解耦（§2a）、Agent Runtime 与 Channel Adapter（§2b）、小手机与工具层（§7a-7c）、工具结果隔离原则（§4）
 > 本文取代 v1 蓝图。v1 中被推翻的表述见文末「已废弃」清单。
 > 施工细则见 `docs/work-order-v1.md`（施工单是本文的执行版，两者冲突时以本文为准，并回来修本文）。
 
@@ -154,6 +154,16 @@ recall_policy:  normal | silent | manual_only
 
 `household + manual_only` 覆盖「AI 该知道但不该主动提起」。`allowed_ai_ids` 留 nullable，第一版只对 private 生效。blocked_channels 等复杂策略组合不做——权限系统是最会膨胀的器官。
 
+### 工具结果与记忆隔离
+
+**工具调用结果默认不进入长期记忆。** 实时位置、路线查询、搜索结果、AI 分享的歌——这些都是短期状态，不是用户事实。"小猫现在在公司附近"不是永久事实；某次路线查询不自动进 canonical memory；AI 分享了一首歌不代表小猫喜欢这首歌。
+
+只有以下路径可以让工具相关内容进入正式记忆库：
+- 用户明确表达的稳定偏好（经 MemoryProposal，claim_type=fact，证据要求照常）
+- 经 MemoryProposal 的体验反馈（claim_type=observation，走候选区）
+
+工具结果有独立的 `tool_runs` 审计表（§7c），与 Memory Hub 的 memories 是两个域，不混。
+
 ## 5. 数据归属与访问边界（issue #6）
 
 ```
@@ -179,6 +189,43 @@ Pulse → ActionProposal → Policy Engine → 自动执行/等待批准/拒绝 
 ```
 
 权限四档：L0 闲逛发呆（自动）｜L1 日记留言（自动可撤销）｜L2 换家具（按设置审批）｜L3 对外发帖、副作用工具（必须审批）。每日成本与次数预算；所有自主内容带来源标记。
+
+### §7a. 小手机：统一工具入口
+
+房子外侧有一个类似《模拟人生》边角按钮的"小手机"。它**不是 MCP Server 管理页，不是开发者控制台**，而是小猫和 AI 连接外部世界的统一入口。前端看到的是 App（高德地图、网易云音乐、浏览器/搜索、日历、塔罗/星盘等），每个 App 底层可以由 MCP、普通 API 或多个服务组合提供。用户和 AI 只看到语义清楚的能力名（如 `maps.search_place`、`music.search`、`web.search`），不需要知道哪台 MCP Server。
+
+三种使用路径：
+1. 小猫主动打开手机使用工具
+2. AI 在聊天中根据小猫要求调用工具
+3. AI 在自主脉冲中，在权限和预算范围内"自己拿起手机"（走 §7 ActionProposal 流程）
+
+所有调用都经过权限判断、记录，并按风险决定自动执行或等待确认。AI 搜到的信息先进收藏夹/便签/待分享箱，不逢搜必播。
+
+### §7b. 工具权限按动作拆分
+
+工具权限不能只按整个 App 粗暴授权（"Lucien 有地图权限"），须按动作拆分。风险级别五档（schema 在 `packages/contracts/src/tool.ts`）：
+
+```
+read_only           搜索、查看公开信息
+internal_write      写入 Lamplight 内部状态（收藏、便签、待分享箱）
+device_action       控制设备（导航、播放）
+external_side_effect 修改外部系统状态（修改歌单、发帖）
+forbidden           默认禁止（历史轨迹、付款、删除）
+```
+
+同一个 App 的不同动作可以处于不同风险级别。第一版不做完整权限管理系统，但 ToolAction schema 要能表达风险级别 + 审批策略。
+
+### §7c. tool_runs：工具调用审计
+
+所有工具调用记录在 `tool_runs` 表（Lamplight 拥有，见 §5）。schema 在 `packages/contracts/src/tool.ts`：
+
+```
+id, actor_id, tool_id, action, source(user_request|conversation|autonomous_pulse),
+risk_level, permission_decision, status, arguments_summary?, result_ref?,
+created_at, expires_at?
+```
+
+敏感结果本身不一定永久保存，可只保存摘要和审计信息。`expires_at` 用于短期状态自动过期（如实时位置查询结果）。
 
 ## 8. Game Room：persistent worlds and pluggable game modes
 

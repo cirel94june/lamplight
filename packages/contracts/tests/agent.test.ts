@@ -107,8 +107,8 @@ describe("ChannelBinding", () => {
     ).toBe(false);
   });
 
-  it("三种渠道类型均合法", () => {
-    for (const ch of ["telegram", "lamplight", "web"]) {
+  it("两种渠道类型均合法", () => {
+    for (const ch of ["telegram", "lamplight_web"]) {
       expect(
         channelBindingSchema.safeParse({
           agent_id: "lucien",

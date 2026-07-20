@@ -37,7 +37,7 @@ export type AgentProfile = z.infer<typeof agentProfileSchema>;
 export const channelBindingSchema = z.object({
   agent_id: z.string().min(1),
   /** 渠道类型 */
-  channel: z.enum(["telegram", "lamplight", "web"]),
+  channel: z.enum(["telegram", "lamplight_web"]),
   /** 渠道侧的外部标识（如 TG bot username） */
   external_id: z.string().min(1),
 });

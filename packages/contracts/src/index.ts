@@ -6,3 +6,4 @@ export * from "./house.js";
 export * from "./action.js";
 export * from "./memory.js";
 export * from "./game.js";
+export * from "./agent.js";

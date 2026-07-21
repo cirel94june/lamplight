@@ -89,6 +89,31 @@ describe("PUT /presence/:ai_id", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects future updated_at", async () => {
+    const futureTime = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const res = await app.request("/presence/xiaoke", {
+      method: "PUT",
+      body: JSON.stringify({
+        scene_id: "room-study",
+        state: "active",
+        updated_at: futureTime,
+      }),
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.message).toContain("future");
+  });
+
+  it("returns 400 for malformed JSON", async () => {
+    const res = await app.request("/presence/xiaoke", {
+      method: "PUT",
+      body: "not json{",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("accepts null scene_id (AI not in any room)", async () => {
     const res = await app.request("/presence/xiaoke", {
       method: "PUT",

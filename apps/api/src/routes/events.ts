@@ -1,9 +1,13 @@
 import { Hono } from "hono";
-import { desc, gte } from "drizzle-orm";
+import { desc, gte, lt } from "drizzle-orm";
 import { houseEventSchema } from "@lamplight/contracts";
 import { db, schema } from "../db/index.js";
 
 const events = new Hono();
+
+function normalizeToUTC(iso: string): string {
+  return new Date(iso).toISOString();
+}
 
 function toRow(ev: ReturnType<typeof houseEventSchema.parse>) {
   return {
@@ -19,7 +23,7 @@ function toRow(ev: ReturnType<typeof houseEventSchema.parse>) {
     context_session_id: ev.context.session_id ?? null,
     context_branch_id: ev.context.branch_id ?? null,
     conversation_kind: ev.conversation_kind,
-    created_at: ev.created_at,
+    created_at: normalizeToUTC(ev.created_at),
   };
 }
 
@@ -49,8 +53,22 @@ function toResponse(row: EventRow) {
 }
 
 events.post("/", async (c) => {
-  const body = await c.req.json();
-  const parsed = houseEventSchema.safeParse(body);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(
+      { ok: false, error: { code: "VALIDATION_ERROR", message: "invalid JSON" } },
+      400,
+    );
+  }
+
+  const input = body as Record<string, unknown>;
+  if (input.context && typeof input.context === "object") {
+    (input.context as Record<string, unknown>).set_by = "server";
+  }
+
+  const parsed = houseEventSchema.safeParse(input);
   if (!parsed.success) {
     return c.json(
       { ok: false, error: { code: "VALIDATION_ERROR", message: parsed.error.message } },
@@ -63,8 +81,14 @@ events.post("/", async (c) => {
 });
 
 events.get("/", async (c) => {
-  const since = c.req.query("since");
-  const limit = Math.min(Number(c.req.query("limit") ?? 50), 200);
+  const sinceRaw = c.req.query("since");
+  const beforeRaw = c.req.query("before");
+  const limitRaw = c.req.query("limit");
+
+  const limitNum = Number(limitRaw ?? 50);
+  const limit = Number.isFinite(limitNum) && limitNum >= 1
+    ? Math.min(Math.floor(limitNum), 200)
+    : 50;
 
   let query = db
     .select()
@@ -72,8 +96,14 @@ events.get("/", async (c) => {
     .orderBy(desc(schema.houseEvents.created_at))
     .limit(limit);
 
-  if (since) {
+  if (sinceRaw) {
+    const since = normalizeToUTC(sinceRaw);
     query = query.where(gte(schema.houseEvents.created_at, since)) as typeof query;
+  }
+
+  if (beforeRaw) {
+    const before = normalizeToUTC(beforeRaw);
+    query = query.where(lt(schema.houseEvents.created_at, before)) as typeof query;
   }
 
   const rows = await query;

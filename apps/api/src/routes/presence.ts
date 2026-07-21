@@ -35,12 +35,30 @@ presence.get("/", async (c) => {
 
 presence.put("/:ai_id", async (c) => {
   const ai_id = c.req.param("ai_id");
-  const body = await c.req.json();
-  const input = { ...body, ai_id };
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(
+      { ok: false, error: { code: "VALIDATION_ERROR", message: "invalid JSON" } },
+      400,
+    );
+  }
+
+  const input = { ...(body as Record<string, unknown>), ai_id };
   const parsed = presenceSchema.safeParse(input);
   if (!parsed.success) {
     return c.json(
       { ok: false, error: { code: "VALIDATION_ERROR", message: parsed.error.message } },
+      400,
+    );
+  }
+
+  const updatedAt = new Date(parsed.data.updated_at);
+  if (updatedAt.getTime() > Date.now()) {
+    return c.json(
+      { ok: false, error: { code: "VALIDATION_ERROR", message: "updated_at cannot be in the future" } },
       400,
     );
   }

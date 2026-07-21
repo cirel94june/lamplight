@@ -74,7 +74,7 @@ prompt_version    # 排查用：当前 prompt 模板版本号（可选）
 
 不做人格管理系统。人格连续性由 Agent Runtime 在运行时组装：统一核心 prompt + 渠道规则 + Hub 返回的记忆上下文 + 当前对话 + 模型能力适配。`personalityProfileId` / `relationshipProfileId` 之类的拆分不设——人设是 prompt 的事，不是 schema 的事。
 
-平台 bot ID（Telegram bot token 对应的 chat ID 等）只是 **Channel Binding**，内部始终使用稳定 `agent_id`。
+平台 bot ID 只是 **Channel Binding**（`external_id` 语义由 `channel` 决定：telegram 填 bot username，lamplight_web 填固定实例标识如 `"lamplight-web-v1"`），内部始终使用稳定 `agent_id`。
 
 ### §2b. Agent Runtime 与 Channel Adapter
 

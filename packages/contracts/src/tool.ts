@@ -94,20 +94,34 @@ export const toolRunSchema = z.object({
   expires_at: z.string().datetime().optional(),
 })
   .superRefine((r, ctx) => {
-    if (
-      r.permission_decision === "denied" &&
-      (r.status === "completed" || r.status === "running")
-    ) {
+    const validTransitions: Record<string, readonly string[]> = {
+      approved: ["pending", "running", "completed", "failed", "cancelled"],
+      auto_approved: ["pending", "running", "completed", "failed", "cancelled"],
+      denied: ["cancelled"],
+      pending: ["pending"],
+    };
+    const allowed = validTransitions[r.permission_decision];
+    if (allowed && !allowed.includes(r.status)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "权限被拒的调用不可能进入 running/completed 状态",
+        message: `permission_decision="${r.permission_decision}" 不允许 status="${r.status}"`,
       });
     }
-    if (r.expires_at && r.expires_at <= r.created_at) {
+    if (r.risk_level === "forbidden" && r.permission_decision !== "denied") {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "expires_at 必须晚于 created_at",
+        message: "forbidden 风险级别的调用 permission_decision 只能是 denied",
       });
+    }
+    if (r.expires_at) {
+      const created = new Date(r.created_at).getTime();
+      const expires = new Date(r.expires_at).getTime();
+      if (expires <= created) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "expires_at 必须晚于 created_at",
+        });
+      }
     }
   });
 export type ToolRun = z.infer<typeof toolRunSchema>;

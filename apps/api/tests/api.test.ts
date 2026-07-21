@@ -38,4 +38,16 @@ describe("auth middleware", () => {
     });
     expect(res.status).toBe(404);
   });
+
+  it("rejects /scenes without token", async () => {
+    const res = await app.request("/scenes");
+    expect(res.status).toBe(401);
+  });
+
+  it("passes /scenes with correct token", async () => {
+    const res = await app.request("/scenes", {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    expect(res.status).toBe(404);
+  });
 });

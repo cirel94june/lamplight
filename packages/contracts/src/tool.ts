@@ -17,24 +17,43 @@ export const toolRiskLevelSchema = z.enum([
 export type ToolRiskLevel = z.infer<typeof toolRiskLevelSchema>;
 
 /** 工具动作定义（注册时用，不是每次调用时传）。 */
-export const toolActionDefinitionSchema = z.object({
-  /** 能力名：maps.search_place, music.search, web.search 等 */
-  tool_id: z.string().min(1),
-  /** 动作名：search_place, plan_route, save_to_inbox 等 */
-  action: z.string().min(1),
-  /** 风险级别 */
-  risk_level: toolRiskLevelSchema,
-  /** 该风险级别下的审批策略 */
-  approval_policy: z.enum([
-    "auto",
-    "auto_revocable",
-    "configurable",
-    "require_confirmation",
-    "forbidden",
-  ]),
-  /** 人类可读说明 */
-  description: z.string().optional(),
-});
+export const toolActionDefinitionSchema = z
+  .object({
+    /** 能力名：maps.search_place, music.search, web.search 等 */
+    tool_id: z.string().min(1),
+    /** 动作名：search_place, plan_route, save_to_inbox 等 */
+    action: z.string().min(1),
+    /** 风险级别 */
+    risk_level: toolRiskLevelSchema,
+    /** 该风险级别下的审批策略 */
+    approval_policy: z.enum([
+      "auto",
+      "auto_revocable",
+      "configurable",
+      "require_confirmation",
+      "forbidden",
+    ]),
+    /** 人类可读说明 */
+    description: z.string().optional(),
+  })
+  .superRefine((d, ctx) => {
+    if (d.risk_level === "forbidden" && d.approval_policy !== "forbidden") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "forbidden 风险级别的动作只能搭配 forbidden 审批策略",
+      });
+    }
+    if (
+      d.risk_level === "external_side_effect" &&
+      (d.approval_policy === "auto" || d.approval_policy === "auto_revocable")
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "external_side_effect 风险级别不允许 auto/auto_revocable 审批策略",
+      });
+    }
+  });
 export type ToolActionDefinition = z.infer<typeof toolActionDefinitionSchema>;
 
 /** 工具调用来源（§7c）。 */
@@ -51,7 +70,7 @@ export type ToolRunSource = z.infer<typeof toolRunSourceSchema>;
  * 敏感结果本身不一定永久保存，可只保存摘要。
  */
 export const toolRunSchema = z.object({
-  id: z.string(),
+  id: z.string().min(1),
   /** 谁发起的（agent_id 或 "owner"） */
   actor_id: z.string().min(1),
   /** 能力名 */
@@ -73,5 +92,22 @@ export const toolRunSchema = z.object({
   created_at: z.string().datetime(),
   /** 短期结果过期时间（如实时位置查询） */
   expires_at: z.string().datetime().optional(),
-});
+})
+  .superRefine((r, ctx) => {
+    if (
+      r.permission_decision === "denied" &&
+      (r.status === "completed" || r.status === "running")
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "权限被拒的调用不可能进入 running/completed 状态",
+      });
+    }
+    if (r.expires_at && r.expires_at <= r.created_at) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "expires_at 必须晚于 created_at",
+      });
+    }
+  });
 export type ToolRun = z.infer<typeof toolRunSchema>;

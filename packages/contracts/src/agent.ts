@@ -31,14 +31,15 @@ export type AgentProfile = z.infer<typeof agentProfileSchema>;
 
 /**
  * Channel Binding：平台 bot ID 到 agent_id 的映射（v2.1 §2b）。
- * Telegram bot token 对应的 ID、Lamplight WebSocket session 等都只是 binding，
- * 内部始终使用稳定 agent_id。
+ * 内部始终使用稳定 agent_id，external_id 语义由 channel 决定：
+ * - telegram: bot username（如 "cloudy_bot"）
+ * - lamplight_web: 固定实例标识（如 "lamplight-web-v1"），不填 session ID
  */
 export const channelBindingSchema = z.object({
   agent_id: z.string().min(1),
   /** 渠道类型 */
   channel: z.enum(["telegram", "lamplight_web"]),
-  /** 渠道侧的外部标识（如 TG bot username） */
+  /** 渠道侧的外部标识，语义由 channel 决定 */
   external_id: z.string().min(1),
 });
 export type ChannelBinding = z.infer<typeof channelBindingSchema>;

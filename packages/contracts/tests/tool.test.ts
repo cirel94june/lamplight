@@ -74,6 +74,54 @@ describe("ToolActionDefinition", () => {
         .success
     ).toBe(false);
   });
+
+  it("forbidden 风险级别只允许 forbidden 审批策略", () => {
+    expect(
+      toolActionDefinitionSchema.safeParse({
+        ...validAction,
+        risk_level: "forbidden",
+        approval_policy: "auto",
+      }).success
+    ).toBe(false);
+    expect(
+      toolActionDefinitionSchema.safeParse({
+        ...validAction,
+        risk_level: "forbidden",
+        approval_policy: "require_confirmation",
+      }).success
+    ).toBe(false);
+    expect(
+      toolActionDefinitionSchema.safeParse({
+        ...validAction,
+        risk_level: "forbidden",
+        approval_policy: "forbidden",
+      }).success
+    ).toBe(true);
+  });
+
+  it("external_side_effect 不允许 auto/auto_revocable", () => {
+    expect(
+      toolActionDefinitionSchema.safeParse({
+        ...validAction,
+        risk_level: "external_side_effect",
+        approval_policy: "auto",
+      }).success
+    ).toBe(false);
+    expect(
+      toolActionDefinitionSchema.safeParse({
+        ...validAction,
+        risk_level: "external_side_effect",
+        approval_policy: "auto_revocable",
+      }).success
+    ).toBe(false);
+    expect(
+      toolActionDefinitionSchema.safeParse({
+        ...validAction,
+        risk_level: "external_side_effect",
+        approval_policy: "require_confirmation",
+      }).success
+    ).toBe(true);
+  });
 });
 
 describe("ToolRunSource", () => {
@@ -118,13 +166,20 @@ describe("ToolRun", () => {
     ).toBe(false);
   });
 
-  it("permission_decision 四种状态均合法", () => {
-    for (const d of ["approved", "auto_approved", "denied", "pending"]) {
+  it("permission_decision 四种状态均合法（搭配兼容 status）", () => {
+    for (const d of ["approved", "auto_approved", "pending"]) {
       expect(
         toolRunSchema.safeParse({ ...validRun, permission_decision: d })
           .success
       ).toBe(true);
     }
+    expect(
+      toolRunSchema.safeParse({
+        ...validRun,
+        permission_decision: "denied",
+        status: "cancelled",
+      }).success
+    ).toBe(true);
   });
 
   it("status 五种状态均合法", () => {
@@ -151,6 +206,53 @@ describe("ToolRun", () => {
   it("expires_at 必须是合法 datetime（如果提供）", () => {
     expect(
       toolRunSchema.safeParse({ ...validRun, expires_at: "tomorrow" }).success
+    ).toBe(false);
+  });
+
+  it("id 不接受空字符串", () => {
+    expect(
+      toolRunSchema.safeParse({ ...validRun, id: "" }).success
+    ).toBe(false);
+  });
+
+  it("denied 状态不可能 completed 或 running", () => {
+    expect(
+      toolRunSchema.safeParse({
+        ...validRun,
+        permission_decision: "denied",
+        status: "completed",
+      }).success
+    ).toBe(false);
+    expect(
+      toolRunSchema.safeParse({
+        ...validRun,
+        permission_decision: "denied",
+        status: "running",
+      }).success
+    ).toBe(false);
+    expect(
+      toolRunSchema.safeParse({
+        ...validRun,
+        permission_decision: "denied",
+        status: "cancelled",
+      }).success
+    ).toBe(true);
+  });
+
+  it("expires_at 必须晚于 created_at", () => {
+    expect(
+      toolRunSchema.safeParse({
+        ...validRun,
+        created_at: "2026-07-20T12:00:00Z",
+        expires_at: "2026-07-20T11:00:00Z",
+      }).success
+    ).toBe(false);
+    expect(
+      toolRunSchema.safeParse({
+        ...validRun,
+        created_at: "2026-07-20T12:00:00Z",
+        expires_at: "2026-07-20T12:00:00Z",
+      }).success
     ).toBe(false);
   });
 });

@@ -118,4 +118,26 @@ describe("ChannelBinding", () => {
       ).toBe(true);
     }
   });
+
+  it("旧渠道值 lamplight / web 被拒", () => {
+    for (const ch of ["lamplight", "web"]) {
+      expect(
+        channelBindingSchema.safeParse({
+          agent_id: "cloudy",
+          channel: ch,
+          external_id: "some_id",
+        }).success
+      ).toBe(false);
+    }
+  });
+
+  it("lamplight_web 的 external_id 填固定实例标识", () => {
+    expect(
+      channelBindingSchema.safeParse({
+        agent_id: "cloudy",
+        channel: "lamplight_web",
+        external_id: "lamplight-web-v1",
+      }).success
+    ).toBe(true);
+  });
 });

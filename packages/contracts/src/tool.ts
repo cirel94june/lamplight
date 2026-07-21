@@ -113,6 +113,16 @@ export const toolRunSchema = z.object({
         message: "forbidden 风险级别的调用 permission_decision 只能是 denied",
       });
     }
+    if (
+      r.risk_level === "external_side_effect" &&
+      r.permission_decision === "auto_approved"
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "external_side_effect 风险级别不允许 auto_approved（§7b：外部副作用必须审批）",
+      });
+    }
     if (r.expires_at) {
       const created = new Date(r.created_at).getTime();
       const expires = new Date(r.expires_at).getTime();

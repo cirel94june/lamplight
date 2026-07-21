@@ -237,6 +237,25 @@ describe("ToolRun", () => {
     }
   });
 
+  it("external_side_effect 不允许 auto_approved（§7b）", () => {
+    expect(
+      toolRunSchema.safeParse({
+        ...validRun,
+        risk_level: "external_side_effect",
+        permission_decision: "auto_approved",
+        status: "completed",
+      }).success
+    ).toBe(false);
+    expect(
+      toolRunSchema.safeParse({
+        ...validRun,
+        risk_level: "external_side_effect",
+        permission_decision: "approved",
+        status: "completed",
+      }).success
+    ).toBe(true);
+  });
+
   it("forbidden 风险级别的 tool_run 只能是 denied", () => {
     expect(
       toolRunSchema.safeParse({

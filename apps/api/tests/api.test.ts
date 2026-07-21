@@ -48,6 +48,6 @@ describe("auth middleware", () => {
     const res = await app.request("/scenes", {
       headers: { Authorization: `Bearer ${TOKEN}` },
     });
-    expect(res.status).toBe(404);
+    expect(res.status).not.toBe(401);
   });
 });

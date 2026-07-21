@@ -1,11 +1,12 @@
-import { serve } from "@hono/node-server";
 import { config } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { app } from "./app.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: resolve(__dirname, "../.env") });
+
+const { serve } = await import("@hono/node-server");
+const { app } = await import("./app.js");
 
 const PORT = Number(process.env.PORT ?? 8787);
 

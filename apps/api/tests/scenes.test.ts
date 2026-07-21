@@ -73,6 +73,14 @@ describe("GET /scenes", () => {
       expect(() => sceneDefinitionSchema.parse(room)).not.toThrow();
     }
   });
+
+  it("does not expose created_at in response", async () => {
+    const res = await app.request("/scenes", { headers: authHeaders });
+    const body = await res.json();
+    for (const room of body.data) {
+      expect(room).not.toHaveProperty("created_at");
+    }
+  });
 });
 
 describe("GET /scenes/:id", () => {

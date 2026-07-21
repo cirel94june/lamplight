@@ -95,11 +95,11 @@ describe("sceneDefinitionSchema", () => {
     expect(result.furniture_slots).toBeNull();
   });
 
-  it("accepts created_at from DB response", () => {
+  it("strips unknown fields (strict by default in Zod)", () => {
     const result = sceneDefinitionSchema.parse({
       ...valid,
       created_at: "2026-07-21 03:59:52",
     });
-    expect(result.created_at).toBe("2026-07-21 03:59:52");
+    expect(result).not.toHaveProperty("created_at");
   });
 });

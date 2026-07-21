@@ -251,4 +251,26 @@ describe("GET /house-events", () => {
     const allIds = [...body1.data, ...body2.data].map((e: { id: string }) => e.id);
     expect(new Set(allIds).size).toBe(3);
   });
+
+  it("cursor works when event ID contains pipe characters", async () => {
+    const sameTime = "2026-07-21T12:00:00Z";
+    for (let i = 0; i < 3; i++) {
+      await postEvent(makeEvent({ id: `evt|pipe|${i}`, created_at: sameTime }));
+    }
+
+    const page1 = await app.request("/house-events?limit=2", { headers: authHeaders });
+    const body1 = await page1.json();
+    expect(body1.data).toHaveLength(2);
+
+    const page2 = await app.request(
+      `/house-events?limit=2&cursor=${encodeURIComponent(body1.next_cursor)}`,
+      { headers: authHeaders },
+    );
+    expect(page2.status).toBe(200);
+    const body2 = await page2.json();
+    expect(body2.data).toHaveLength(1);
+
+    const allIds = [...body1.data, ...body2.data].map((e: { id: string }) => e.id);
+    expect(new Set(allIds).size).toBe(3);
+  });
 });

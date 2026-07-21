@@ -1,6 +1,6 @@
 import { Hono } from "hono";
-import { and, desc, gte, lt, or, eq, sql } from "drizzle-orm";
-import { z } from "zod";
+import { and, desc, gte, lt, or, eq } from "drizzle-orm";
+import { houseEventSchema } from "@lamplight/contracts";
 import { db, schema } from "../db/index.js";
 
 const events = new Hono();
@@ -14,18 +14,21 @@ function isValidISO(s: string): boolean {
   return !isNaN(d.getTime());
 }
 
-const eventInputSchema = z.object({
-  id: z.string().min(1),
-  type: z.string().min(1),
-  actor: z.object({
-    type: z.enum(["user", "ai", "system"]),
-    ai_id: z.string().optional(),
-  }),
-  scene_id: z.string().optional(),
-  payload: z.record(z.unknown()),
-  description: z.string().optional(),
-  created_at: z.string().datetime(),
-});
+function encodeCursor(time: string, id: string): string {
+  return Buffer.from(JSON.stringify({ t: time, i: id })).toString("base64url");
+}
+
+function decodeCursor(cursor: string): { t: string; i: string } | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString());
+    if (typeof parsed.t === "string" && typeof parsed.i === "string") {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 type EventRow = typeof schema.houseEvents.$inferSelect;
 
@@ -70,7 +73,16 @@ events.post("/", async (c) => {
     );
   }
 
-  const parsed = eventInputSchema.safeParse(body);
+  const input = {
+    ...(body as Record<string, unknown>),
+    context: {
+      context_type: "out_of_world",
+      set_by: "server",
+    },
+    conversation_kind: "house_chat",
+  };
+
+  const parsed = houseEventSchema.safeParse(input);
   if (!parsed.success) {
     return c.json(
       { ok: false, error: { code: "VALIDATION_ERROR", message: parsed.error.message } },
@@ -87,11 +99,11 @@ events.post("/", async (c) => {
     scene_id: ev.scene_id ?? null,
     payload: ev.payload,
     description: ev.description ?? null,
-    context_type: "out_of_world",
-    context_world_id: null,
-    context_session_id: null,
-    context_branch_id: null,
-    conversation_kind: "house_chat",
+    context_type: ev.context.context_type,
+    context_world_id: ev.context.world_id ?? null,
+    context_session_id: ev.context.session_id ?? null,
+    context_branch_id: ev.context.branch_id ?? null,
+    conversation_kind: ev.conversation_kind,
     created_at: normalizeToUTC(ev.created_at),
   });
 
@@ -132,28 +144,20 @@ events.get("/", async (c) => {
   }
 
   if (cursorRaw) {
-    const sep = cursorRaw.lastIndexOf("|");
-    if (sep === -1) {
-      return c.json(
-        { ok: false, error: { code: "VALIDATION_ERROR", message: "invalid cursor format" } },
-        400,
-      );
-    }
-    const cursorTime = cursorRaw.slice(0, sep);
-    const cursorId = cursorRaw.slice(sep + 1);
-    if (!isValidISO(cursorTime) || !cursorId) {
+    const cursor = decodeCursor(cursorRaw);
+    if (!cursor || !isValidISO(cursor.t)) {
       return c.json(
         { ok: false, error: { code: "VALIDATION_ERROR", message: "invalid cursor" } },
         400,
       );
     }
-    const normalizedTime = normalizeToUTC(cursorTime);
+    const normalizedTime = normalizeToUTC(cursor.t);
     conditions.push(
       or(
         lt(schema.houseEvents.created_at, normalizedTime),
         and(
           eq(schema.houseEvents.created_at, normalizedTime),
-          lt(schema.houseEvents.id, cursorId),
+          lt(schema.houseEvents.id, cursor.i),
         ),
       )!,
     );
@@ -169,7 +173,7 @@ events.get("/", async (c) => {
     .limit(limit);
 
   const nextCursor = rows.length === limit
-    ? `${rows[rows.length - 1].created_at}|${rows[rows.length - 1].id}`
+    ? encodeCursor(rows[rows.length - 1].created_at, rows[rows.length - 1].id)
     : null;
 
   return c.json({

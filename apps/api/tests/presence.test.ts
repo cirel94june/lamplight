@@ -114,6 +114,15 @@ describe("PUT /presence/:ai_id", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 400 for null body", async () => {
+    const res = await app.request("/presence/xiaoke", {
+      method: "PUT",
+      body: JSON.stringify(null),
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("accepts null scene_id (AI not in any room)", async () => {
     const res = await app.request("/presence/xiaoke", {
       method: "PUT",

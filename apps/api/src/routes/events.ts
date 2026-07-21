@@ -1,6 +1,6 @@
 import { Hono } from "hono";
-import { desc, gte, lt } from "drizzle-orm";
-import { houseEventSchema } from "@lamplight/contracts";
+import { and, desc, gte, lt, or, eq, sql } from "drizzle-orm";
+import { z } from "zod";
 import { db, schema } from "../db/index.js";
 
 const events = new Hono();
@@ -9,23 +9,23 @@ function normalizeToUTC(iso: string): string {
   return new Date(iso).toISOString();
 }
 
-function toRow(ev: ReturnType<typeof houseEventSchema.parse>) {
-  return {
-    id: ev.id,
-    type: ev.type,
-    actor_type: ev.actor.type,
-    actor_ai_id: ev.actor.ai_id ?? null,
-    scene_id: ev.scene_id ?? null,
-    payload: ev.payload,
-    description: ev.description ?? null,
-    context_type: ev.context.context_type,
-    context_world_id: ev.context.world_id ?? null,
-    context_session_id: ev.context.session_id ?? null,
-    context_branch_id: ev.context.branch_id ?? null,
-    conversation_kind: ev.conversation_kind,
-    created_at: normalizeToUTC(ev.created_at),
-  };
+function isValidISO(s: string): boolean {
+  const d = new Date(s);
+  return !isNaN(d.getTime());
 }
+
+const eventInputSchema = z.object({
+  id: z.string().min(1),
+  type: z.string().min(1),
+  actor: z.object({
+    type: z.enum(["user", "ai", "system"]),
+    ai_id: z.string().optional(),
+  }),
+  scene_id: z.string().optional(),
+  payload: z.record(z.unknown()),
+  description: z.string().optional(),
+  created_at: z.string().datetime(),
+});
 
 type EventRow = typeof schema.houseEvents.$inferSelect;
 
@@ -63,12 +63,14 @@ events.post("/", async (c) => {
     );
   }
 
-  const input = body as Record<string, unknown>;
-  if (input.context && typeof input.context === "object") {
-    (input.context as Record<string, unknown>).set_by = "server";
+  if (body === null || typeof body !== "object") {
+    return c.json(
+      { ok: false, error: { code: "VALIDATION_ERROR", message: "request body must be an object" } },
+      400,
+    );
   }
 
-  const parsed = houseEventSchema.safeParse(input);
+  const parsed = eventInputSchema.safeParse(body);
   if (!parsed.success) {
     return c.json(
       { ok: false, error: { code: "VALIDATION_ERROR", message: parsed.error.message } },
@@ -76,13 +78,30 @@ events.post("/", async (c) => {
     );
   }
 
-  await db.insert(schema.houseEvents).values(toRow(parsed.data));
-  return c.json({ ok: true, data: { id: parsed.data.id } }, 201);
+  const ev = parsed.data;
+  await db.insert(schema.houseEvents).values({
+    id: ev.id,
+    type: ev.type,
+    actor_type: ev.actor.type,
+    actor_ai_id: ev.actor.ai_id ?? null,
+    scene_id: ev.scene_id ?? null,
+    payload: ev.payload,
+    description: ev.description ?? null,
+    context_type: "out_of_world",
+    context_world_id: null,
+    context_session_id: null,
+    context_branch_id: null,
+    conversation_kind: "house_chat",
+    created_at: normalizeToUTC(ev.created_at),
+  });
+
+  return c.json({ ok: true, data: { id: ev.id } }, 201);
 });
 
 events.get("/", async (c) => {
   const sinceRaw = c.req.query("since");
   const beforeRaw = c.req.query("before");
+  const cursorRaw = c.req.query("cursor");
   const limitRaw = c.req.query("limit");
 
   const limitNum = Number(limitRaw ?? 50);
@@ -90,24 +109,74 @@ events.get("/", async (c) => {
     ? Math.min(Math.floor(limitNum), 200)
     : 50;
 
-  let query = db
-    .select()
-    .from(schema.houseEvents)
-    .orderBy(desc(schema.houseEvents.created_at))
-    .limit(limit);
+  const conditions = [];
 
   if (sinceRaw) {
-    const since = normalizeToUTC(sinceRaw);
-    query = query.where(gte(schema.houseEvents.created_at, since)) as typeof query;
+    if (!isValidISO(sinceRaw)) {
+      return c.json(
+        { ok: false, error: { code: "VALIDATION_ERROR", message: "invalid since timestamp" } },
+        400,
+      );
+    }
+    conditions.push(gte(schema.houseEvents.created_at, normalizeToUTC(sinceRaw)));
   }
 
   if (beforeRaw) {
-    const before = normalizeToUTC(beforeRaw);
-    query = query.where(lt(schema.houseEvents.created_at, before)) as typeof query;
+    if (!isValidISO(beforeRaw)) {
+      return c.json(
+        { ok: false, error: { code: "VALIDATION_ERROR", message: "invalid before timestamp" } },
+        400,
+      );
+    }
+    conditions.push(lt(schema.houseEvents.created_at, normalizeToUTC(beforeRaw)));
   }
 
-  const rows = await query;
-  return c.json({ ok: true, data: rows.map(toResponse) });
+  if (cursorRaw) {
+    const sep = cursorRaw.lastIndexOf("|");
+    if (sep === -1) {
+      return c.json(
+        { ok: false, error: { code: "VALIDATION_ERROR", message: "invalid cursor format" } },
+        400,
+      );
+    }
+    const cursorTime = cursorRaw.slice(0, sep);
+    const cursorId = cursorRaw.slice(sep + 1);
+    if (!isValidISO(cursorTime) || !cursorId) {
+      return c.json(
+        { ok: false, error: { code: "VALIDATION_ERROR", message: "invalid cursor" } },
+        400,
+      );
+    }
+    const normalizedTime = normalizeToUTC(cursorTime);
+    conditions.push(
+      or(
+        lt(schema.houseEvents.created_at, normalizedTime),
+        and(
+          eq(schema.houseEvents.created_at, normalizedTime),
+          lt(schema.houseEvents.id, cursorId),
+        ),
+      )!,
+    );
+  }
+
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+  const rows = await db
+    .select()
+    .from(schema.houseEvents)
+    .where(where)
+    .orderBy(desc(schema.houseEvents.created_at), desc(schema.houseEvents.id))
+    .limit(limit);
+
+  const nextCursor = rows.length === limit
+    ? `${rows[rows.length - 1].created_at}|${rows[rows.length - 1].id}`
+    : null;
+
+  return c.json({
+    ok: true,
+    data: rows.map(toResponse),
+    next_cursor: nextCursor,
+  });
 });
 
 export { events };

@@ -46,6 +46,12 @@ presence.put("/:ai_id", async (c) => {
     );
   }
 
+  if (body === null || typeof body !== "object") {
+    return c.json(
+      { ok: false, error: { code: "VALIDATION_ERROR", message: "request body must be an object" } },
+      400,
+    );
+  }
   const input = { ...(body as Record<string, unknown>), ai_id };
   const parsed = presenceSchema.safeParse(input);
   if (!parsed.success) {

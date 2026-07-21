@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "dev": "node --watch dist/index.js",
+    "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
@@ -24,6 +24,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "drizzle-kit": "^0.31.10",
+    "tsx": "^4.23.1",
     "typescript": "^5.6.0",
     "vitest": "^2.1.9"
   }

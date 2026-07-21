@@ -17,7 +17,7 @@
 **做什么**：让 apps/api 成为一个能跑的服务器。
 
 - 选型：Hono（轻、类型好、适合 monorepo）或 Express——施工方自选，但选了就定，不来回换
-- SQLite（better-sqlite3）做本地开发数据库，migration 框架（drizzle-kit 或 kysely）
+- SQLite（@libsql/client，纯 JS/Wasm 无需原生编译）做本地开发数据库，migration 框架（drizzle-kit）
 - 建表：scenes、house_events、ai_presence（字段对齐 contracts schema）
 - owner token 鉴权中间件（v2.1 §9：单用户 bearer auth，token 从环境变量读）
 - 健康检查端点 `GET /health`

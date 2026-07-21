@@ -1,6 +1,12 @@
 import { createMiddleware } from "hono/factory";
 
+const PUBLIC_PATHS = ["/health"];
+
 export const authMiddleware = createMiddleware(async (c, next) => {
+  if (PUBLIC_PATHS.includes(c.req.path)) {
+    return next();
+  }
+
   const token = process.env.OWNER_TOKEN;
   if (!token) {
     console.error("[auth] OWNER_TOKEN not set");

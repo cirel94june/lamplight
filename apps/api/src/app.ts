@@ -5,6 +5,6 @@ const app = new Hono();
 
 app.get("/health", (c) => c.json({ ok: true, data: { status: "healthy" } }));
 
-app.use("/api/*", authMiddleware);
+app.use("*", authMiddleware);
 
 export { app };

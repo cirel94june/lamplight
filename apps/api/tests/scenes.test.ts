@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeAll, beforeEach } from "vitest";
+import { sceneDefinitionSchema } from "@lamplight/contracts";
 import { app } from "../src/app.js";
 import { db, schema } from "../src/db/index.js";
 import { ROOMS } from "../seed/rooms.js";
@@ -62,6 +63,14 @@ describe("GET /scenes", () => {
       expect(room.scene_id).toBeTruthy();
       expect(room.display_name).toBeTruthy();
       expect(room.prompt_weight_overrides).toBeDefined();
+    }
+  });
+
+  it("every room validates against sceneDefinitionSchema", async () => {
+    const res = await app.request("/scenes", { headers: authHeaders });
+    const body = await res.json();
+    for (const room of body.data) {
+      expect(() => sceneDefinitionSchema.parse(room)).not.toThrow();
     }
   });
 });

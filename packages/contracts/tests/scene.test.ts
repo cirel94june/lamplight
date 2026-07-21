@@ -84,4 +84,22 @@ describe("sceneDefinitionSchema", () => {
       sceneDefinitionSchema.parse({ ...valid, furniture_slots: 2.5 }),
     ).toThrow();
   });
+
+  it("accepts null for max_participants and furniture_slots (DB compat)", () => {
+    const result = sceneDefinitionSchema.parse({
+      ...valid,
+      max_participants: null,
+      furniture_slots: null,
+    });
+    expect(result.max_participants).toBeNull();
+    expect(result.furniture_slots).toBeNull();
+  });
+
+  it("accepts created_at from DB response", () => {
+    const result = sceneDefinitionSchema.parse({
+      ...valid,
+      created_at: "2026-07-21 03:59:52",
+    });
+    expect(result.created_at).toBe("2026-07-21 03:59:52");
+  });
 });

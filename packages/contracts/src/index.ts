@@ -3,6 +3,7 @@ export * from "./common.js";
 export * from "./context.js";
 export * from "./conversation.js";
 export * from "./house.js";
+export * from "./scene.js";
 export * from "./action.js";
 export * from "./memory.js";
 export * from "./game.js";

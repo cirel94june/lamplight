@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { and, desc, gte, lt, or, eq } from "drizzle-orm";
 import { houseEventSchema } from "@lamplight/contracts";
 import { db, schema } from "../db/index.js";
+import { broadcast } from "../broadcast.js";
 
 const events = new Hono();
 
@@ -91,6 +92,7 @@ events.post("/", async (c) => {
   }
 
   const ev = parsed.data;
+  const normalizedCreatedAt = normalizeToUTC(ev.created_at);
   await db.insert(schema.houseEvents).values({
     id: ev.id,
     type: ev.type,
@@ -104,7 +106,28 @@ events.post("/", async (c) => {
     context_session_id: ev.context.session_id ?? null,
     context_branch_id: ev.context.branch_id ?? null,
     conversation_kind: ev.conversation_kind,
-    created_at: normalizeToUTC(ev.created_at),
+    created_at: normalizedCreatedAt,
+  });
+
+  broadcast({
+    type: "house_event",
+    data: {
+      id: ev.id,
+      type: ev.type,
+      actor: {
+        type: ev.actor.type,
+        ...(ev.actor.ai_id ? { ai_id: ev.actor.ai_id } : {}),
+      },
+      scene_id: ev.scene_id ?? undefined,
+      payload: ev.payload,
+      description: ev.description ?? undefined,
+      context: {
+        context_type: ev.context.context_type,
+        set_by: "server" as const,
+      },
+      conversation_kind: ev.conversation_kind,
+      created_at: normalizedCreatedAt,
+    },
   });
 
   return c.json({ ok: true, data: { id: ev.id } }, 201);

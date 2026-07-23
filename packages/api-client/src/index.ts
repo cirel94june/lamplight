@@ -1,6 +1,8 @@
 import type { z } from "zod";
 import { apiResponseSchema, type ApiResponse } from "@lamplight/contracts";
 
+export { HouseWsClient, type WsMessage, type WsMessageType, type WsStatus, type WsListener, type WsStatusListener, type HouseWsOptions } from "./ws.js";
+
 /**
  * 前端调 House API 的 SDK。
  * 前端不持有任何密钥、不直连 MCP/Hub——一切请求只走 House API/BFF。

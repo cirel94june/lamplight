@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { presenceSchema } from "@lamplight/contracts";
 import { db, schema } from "../db/index.js";
+import { broadcast } from "../broadcast.js";
 
 const IDLE_THRESHOLD_MS = Number(process.env.PRESENCE_IDLE_MS ?? 30 * 60 * 1000);
 
@@ -85,6 +86,15 @@ presence.put("/:ai_id", async (c) => {
         updated_at: parsed.data.updated_at,
       },
     });
+
+  const responseData = toResponse({
+    ai_id: parsed.data.ai_id,
+    scene_id: parsed.data.scene_id,
+    state: parsed.data.state,
+    updated_at: parsed.data.updated_at,
+  });
+
+  broadcast({ type: "presence_update", data: responseData });
 
   return c.json({ ok: true, data: parsed.data });
 });

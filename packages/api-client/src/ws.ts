@@ -39,6 +39,13 @@ export class HouseWsClient {
 
   connect(): void {
     if (this.closed) return;
+    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
+      return;
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.setStatus("connecting");
 
     const ws = new WebSocket(this.url);
@@ -48,6 +55,7 @@ export class HouseWsClient {
     });
 
     ws.addEventListener("message", (event) => {
+      if (this.ws !== ws) return;
       try {
         const msg = JSON.parse(String(event.data)) as WsMessage;
         if (msg.type === "connected") {
@@ -62,6 +70,7 @@ export class HouseWsClient {
     });
 
     ws.addEventListener("close", () => {
+      if (this.ws !== ws) return;
       this.ws = null;
       this.setStatus("disconnected");
       this.scheduleReconnect();

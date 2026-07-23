@@ -62,6 +62,18 @@ function waitForMessage(ws: WebSocket, timeoutMs = 5000): Promise<Record<string,
   });
 }
 
+function waitForClientCount(target: number, timeoutMs = 2000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + timeoutMs;
+    const check = () => {
+      if (getClientCount() === target) return resolve();
+      if (Date.now() > deadline) return reject(new Error(`client count ${getClientCount()} != ${target}`));
+      setTimeout(check, 10);
+    };
+    check();
+  });
+}
+
 describe("WebSocket connection", () => {
   it("connects with valid token and receives connected message", async () => {
     const { ws, firstMessage } = await connectWs();
@@ -94,13 +106,7 @@ describe("WebSocket connection", () => {
     expect(getClientCount()).toBe(before + 1);
     ws.close();
     await new Promise((r) => ws.on("close", r));
-    await new Promise<void>((resolve) => {
-      const check = () => {
-        if (getClientCount() === before) resolve();
-        else setTimeout(check, 10);
-      };
-      check();
-    });
+    await waitForClientCount(before);
     expect(getClientCount()).toBe(before);
   });
 });
@@ -201,5 +207,55 @@ describe("WebSocket broadcasts", () => {
     expect((msg2.data as Record<string, unknown>).id).toBe("evt-ws-multi");
 
     ws2.close();
+  });
+});
+
+describe("WebSocket heartbeat", () => {
+  let heartbeatServer: Server;
+  let heartbeatWsUrl: string;
+
+  beforeAll(async () => {
+    heartbeatServer = createServer(getRequestListener(app.fetch));
+    attachWebSocket(heartbeatServer, { pingIntervalMs: 50 });
+
+    await new Promise<void>((resolve) => {
+      heartbeatServer.listen(0, "127.0.0.1", () => {
+        const addr = heartbeatServer.address() as AddressInfo;
+        heartbeatWsUrl = `ws://127.0.0.1:${addr.port}/ws?token=${TOKEN}`;
+        resolve();
+      });
+    });
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((r) => heartbeatServer.close(() => r()));
+  });
+
+  it("terminates client that does not respond to pong", async () => {
+    const ws = new WebSocket(heartbeatWsUrl, { autoPong: false });
+    await new Promise<void>((resolve) => {
+      ws.once("message", () => resolve());
+    });
+    expect(getClientCount()).toBeGreaterThanOrEqual(1);
+
+    const closed = new Promise<number>((resolve) => {
+      ws.on("close", (code) => resolve(code));
+    });
+
+    const code = await closed;
+    expect(code).toBe(1006);
+  });
+
+  it("does not terminate client that responds to pong normally", async () => {
+    const ws = new WebSocket(heartbeatWsUrl);
+    await new Promise<void>((resolve) => {
+      ws.once("message", () => resolve());
+    });
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+    ws.close();
+    await new Promise((r) => ws.on("close", r));
   });
 });

@@ -4,8 +4,13 @@ import { addClient } from "./broadcast.js";
 
 const PING_INTERVAL_MS = 30_000;
 
-export function attachWebSocket(server: Server) {
+export interface AttachWebSocketOptions {
+  pingIntervalMs?: number;
+}
+
+export function attachWebSocket(server: Server, options?: AttachWebSocketOptions) {
   const wss = new WebSocketServer({ noServer: true });
+  const interval = options?.pingIntervalMs ?? PING_INTERVAL_MS;
 
   server.on("upgrade", (req: IncomingMessage, socket, head) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
@@ -27,18 +32,31 @@ export function attachWebSocket(server: Server) {
     });
   });
 
-  wss.on("connection", (ws: WebSocket) => {
+  wss.on("connection", (ws: WebSocket & { isAlive?: boolean }) => {
+    ws.isAlive = true;
     addClient(ws);
     ws.send(JSON.stringify({ type: "connected" }));
 
-    const pingTimer = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.ping();
-      }
-    }, PING_INTERVAL_MS);
-
-    ws.on("close", () => clearInterval(pingTimer));
+    ws.on("pong", () => {
+      (ws as WebSocket & { isAlive?: boolean }).isAlive = true;
+    });
   });
+
+  const heartbeatTimer = setInterval(() => {
+    for (const ws of wss.clients) {
+      const client = ws as WebSocket & { isAlive?: boolean };
+      if (client.isAlive === false) {
+        client.terminate();
+        continue;
+      }
+      client.isAlive = false;
+      if (client.readyState === WebSocket.OPEN) {
+        client.ping();
+      }
+    }
+  }, interval);
+
+  wss.on("close", () => clearInterval(heartbeatTimer));
 
   return wss;
 }

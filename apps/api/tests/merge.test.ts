@@ -66,6 +66,15 @@ describe("mergeEvents", () => {
     expect(result.map((e) => e.id)).toEqual(["e4", "e3", "e2", "e1"]);
   });
 
+  it("sorts sub-second timestamps correctly", () => {
+    const e1 = makeEvent("e1", "2026-07-24T01:00:00Z");
+    const e2 = makeEvent("e2", "2026-07-24T01:00:00.500Z");
+    const e3 = makeEvent("e3", "2026-07-24T01:00:00.001Z");
+
+    const result = mergeEvents([], [e1, e2, e3]);
+    expect(result.map((e) => e.id)).toEqual(["e2", "e3", "e1"]);
+  });
+
   it("caps at 200 events", () => {
     const events = Array.from({ length: 210 }, (_, i) =>
       makeEvent(`e${i}`, `2026-07-24T${String(i).padStart(2, "0")}:00:00Z`),
@@ -132,5 +141,25 @@ describe("mergePresence", () => {
     const result = mergePresence([existing], [incoming]);
     const xiaoke = result.find((p) => p.ai_id === "xiaoke")!;
     expect(xiaoke.scene_id).toBe("room-study");
+  });
+
+  it("sub-second timestamp beats whole-second timestamp", () => {
+    const older = makePresence("xiaoke", "room-living-room", "2026-07-24T01:00:00Z");
+    const newer = makePresence("xiaoke", "room-study", "2026-07-24T01:00:00.001Z");
+
+    const result = mergePresence([older], [newer]);
+    const xiaoke = result.find((p) => p.ai_id === "xiaoke")!;
+    expect(xiaoke.scene_id).toBe("room-study");
+    expect(xiaoke.updated_at).toBe("2026-07-24T01:00:00.001Z");
+  });
+
+  it("sub-second timestamp does not lose to whole-second when existing is newer", () => {
+    const newer = makePresence("xiaoke", "room-study", "2026-07-24T01:00:00.500Z");
+    const older = makePresence("xiaoke", "room-living-room", "2026-07-24T01:00:00Z");
+
+    const result = mergePresence([newer], [older]);
+    const xiaoke = result.find((p) => p.ai_id === "xiaoke")!;
+    expect(xiaoke.scene_id).toBe("room-study");
+    expect(xiaoke.updated_at).toBe("2026-07-24T01:00:00.500Z");
   });
 });

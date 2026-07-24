@@ -10,6 +10,7 @@ beforeAll(async () => {
     prompt_weight_overrides TEXT DEFAULT '{}',
     max_participants INTEGER,
     furniture_slots INTEGER,
+    default_turn_policy TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
 

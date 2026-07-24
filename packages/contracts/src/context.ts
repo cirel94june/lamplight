@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { contextTypeSchema, type ConversationKind } from "./enums.js";
+import { contextTypeSchema, conversationKindSchema, type ConversationKind } from "./enums.js";
 
 /**
  * 语境三件套之一：ContextEnvelope。
@@ -58,3 +58,15 @@ export function validateContextForKind(
   }
   return errors;
 }
+
+/**
+ * ContextBuildRequest：Agent Runtime 向 ContextBuilder 请求组装 prompt 时的输入。
+ */
+export const contextBuildRequestSchema = z.object({
+  agent_id: z.string().min(1),
+  conversation_id: z.string().min(1),
+  scene_id: z.string().min(1).optional(),
+  conversation_kind: conversationKindSchema,
+  max_history_messages: z.number().int().positive().optional(),
+});
+export type ContextBuildRequest = z.infer<typeof contextBuildRequestSchema>;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   agentProfileSchema,
+  agentRuntimeConfigSchema,
   channelBindingSchema,
   modelConfigSchema,
 } from "../src/index.js";
@@ -139,5 +140,60 @@ describe("ChannelBinding", () => {
         external_id: "lamplight-web-v1",
       }).success
     ).toBe(true);
+  });
+});
+
+describe("AgentRuntimeConfig", () => {
+  const valid = {
+    agent_id: "xiaoke",
+    random_reply_affinity: 0.7,
+  };
+
+  it("accepts minimal config", () => {
+    expect(agentRuntimeConfigSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("accepts full config with optional fields", () => {
+    expect(
+      agentRuntimeConfigSchema.safeParse({
+        ...valid,
+        max_response_tokens: 2048,
+        temperature: 0.8,
+        system_prompt_template: "你是{{display_name}}，现在在{{scene_name}}",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects random_reply_affinity above 1", () => {
+    expect(
+      agentRuntimeConfigSchema.safeParse({ ...valid, random_reply_affinity: 1.5 })
+        .success,
+    ).toBe(false);
+  });
+
+  it("rejects random_reply_affinity below 0", () => {
+    expect(
+      agentRuntimeConfigSchema.safeParse({ ...valid, random_reply_affinity: -0.1 })
+        .success,
+    ).toBe(false);
+  });
+
+  it("rejects empty agent_id", () => {
+    expect(
+      agentRuntimeConfigSchema.safeParse({ ...valid, agent_id: "" }).success,
+    ).toBe(false);
+  });
+
+  it("rejects temperature above 2", () => {
+    expect(
+      agentRuntimeConfigSchema.safeParse({ ...valid, temperature: 2.5 }).success,
+    ).toBe(false);
+  });
+
+  it("rejects empty system_prompt_template", () => {
+    expect(
+      agentRuntimeConfigSchema.safeParse({ ...valid, system_prompt_template: "" })
+        .success,
+    ).toBe(false);
   });
 });

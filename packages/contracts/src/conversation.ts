@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { contextEnvelopeSchema, validateContextForKind } from "./context.js";
 import { conversationKindSchema, speechModeSchema } from "./enums.js";
+import { turnPolicySchema } from "./turn-policy.js";
 
 /** 消息发送者。ai 必须带 ai_id。 */
 export const messageSenderSchema = z
@@ -28,6 +29,9 @@ export const promptSnapshotSchema = z.object({
 });
 export type PromptSnapshot = z.infer<typeof promptSnapshotSchema>;
 
+export const conversationStatusSchema = z.enum(["active", "archived"]);
+export type ConversationStatus = z.infer<typeof conversationStatusSchema>;
+
 export const conversationSchema = z.object({
   id: z.string(),
   kind: conversationKindSchema,
@@ -35,6 +39,8 @@ export const conversationSchema = z.object({
   world_id: z.string().optional(),
   session_id: z.string().optional(),
   participant_ai_ids: z.array(z.string()),
+  turn_policy: turnPolicySchema.nullish(),
+  status: conversationStatusSchema.default("active"),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
 });

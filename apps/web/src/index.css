@@ -1,0 +1,154 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg: #FFF8F0;
+  --text-primary: #3E2723;
+  --text-secondary: #795548;
+  --room-bg: #FFF3E0;
+  --room-border: #D7CCC8;
+  --room-border-active: #FF8A65;
+  --room-selected: #FFE0B2;
+  --feed-bg: #FAFAFA;
+  --feed-border: #EFEBE9;
+  --header-bg: #FFF8F0;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: var(--text-primary);
+  background: var(--bg);
+}
+
+:root[data-theme="night"] {
+  --bg: #1A1A2E;
+  --text-primary: #E8E0D8;
+  --text-secondary: #A1887F;
+  --room-bg: #252545;
+  --room-border: #3D3D5C;
+  --room-border-active: #FF8A65;
+  --room-selected: #33335A;
+  --feed-bg: #1E1E36;
+  --feed-border: #2D2D4A;
+  --header-bg: #1A1A2E;
+}
+
+.app {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1rem;
+  min-height: 100vh;
+}
+
+.loading {
+  text-align: center;
+  padding: 3rem;
+  color: var(--text-secondary);
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0 1rem;
+  border-bottom: 1px solid var(--feed-border);
+  margin-bottom: 1rem;
+}
+
+.app-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.app-body {
+  display: flex;
+  gap: 1rem;
+}
+
+.house-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.feed-panel {
+  width: 260px;
+  flex-shrink: 0;
+}
+
+.event-feed {
+  background: var(--feed-bg);
+  border: 1px solid var(--feed-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.event-feed-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--feed-border);
+}
+
+.event-feed-list {
+  max-height: 480px;
+  overflow-y: auto;
+  padding: 0.4rem 0;
+}
+
+.event-feed-empty {
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.event-item {
+  display: flex;
+  gap: 8px;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  border-bottom: 1px solid var(--feed-border);
+}
+
+.event-item:last-child {
+  border-bottom: none;
+}
+
+.event-time {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.event-desc {
+  color: var(--text-primary);
+}
+
+@media (max-width: 640px) {
+  .app-body {
+    flex-direction: column;
+  }
+  .feed-panel {
+    width: 100%;
+  }
+}

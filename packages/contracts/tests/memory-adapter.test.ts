@@ -43,12 +43,32 @@ describe("privateNoteSchema", () => {
     id: "note_1",
     ai_id: "xiaoke",
     content: "小猫今天心情不太好",
+    claim_type: "observation",
     created_at: "2026-07-24T10:00:00Z",
     updated_at: "2026-07-24T10:00:00Z",
   };
 
   it("accepts valid note without TTL", () => {
     expect(privateNoteSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("accepts all three claim_type values", () => {
+    for (const ct of ["fact", "observation", "hypothesis"]) {
+      expect(
+        privateNoteSchema.safeParse({ ...valid, claim_type: ct }).success,
+      ).toBe(true);
+    }
+  });
+
+  it("rejects note without claim_type", () => {
+    const { claim_type, ...noClaim } = valid;
+    expect(privateNoteSchema.safeParse(noClaim).success).toBe(false);
+  });
+
+  it("rejects invalid claim_type", () => {
+    expect(
+      privateNoteSchema.safeParse({ ...valid, claim_type: "guess" }).success,
+    ).toBe(false);
   });
 
   it("accepts valid note with TTL", () => {

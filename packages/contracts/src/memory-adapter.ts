@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { claimTypeSchema } from "./enums.js";
 
 /**
  * MemoryAdapter 契约：Agent Runtime 通过此接口访问 Hub 记忆。
@@ -14,10 +15,15 @@ export const memoryFragmentSchema = z.object({
 });
 export type MemoryFragment = z.infer<typeof memoryFragmentSchema>;
 
+/**
+ * 蓝图§4：AI 私人笔记可含推测但须标 observation/hypothesis。
+ * claim_type 必填——没有 claim_type 的笔记无法走正确的分流。
+ */
 export const privateNoteSchema = z.object({
   id: z.string().min(1),
   ai_id: z.string().min(1),
   content: z.string().min(1),
+  claim_type: claimTypeSchema,
   ttl_ms: z.number().int().positive().optional(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),

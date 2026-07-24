@@ -1,0 +1,1 @@
+ALTER TABLE `scenes` ADD `default_turn_policy` text;

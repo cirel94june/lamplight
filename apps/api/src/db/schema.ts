@@ -10,6 +10,8 @@ export const scenes = sqliteTable("scenes", {
     .default({}),
   max_participants: integer("max_participants"),
   furniture_slots: integer("furniture_slots"),
+  default_turn_policy: text("default_turn_policy", { mode: "json" })
+    .$type<{ policy_id: string; triggers: { on_user_message: string; on_agent_message: { mention: boolean; random: boolean; cooldown_ms: number; max_consecutive: number } } } | null>(),
   created_at: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),

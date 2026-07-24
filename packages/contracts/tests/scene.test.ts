@@ -102,4 +102,45 @@ describe("sceneDefinitionSchema", () => {
     });
     expect(result).not.toHaveProperty("created_at");
   });
+
+  it("accepts null default_turn_policy", () => {
+    const result = sceneDefinitionSchema.parse({
+      ...valid,
+      default_turn_policy: null,
+    });
+    expect(result.default_turn_policy).toBeNull();
+  });
+
+  it("omitting default_turn_policy defaults to undefined", () => {
+    const result = sceneDefinitionSchema.parse(valid);
+    expect(result.default_turn_policy).toBeUndefined();
+  });
+
+  it("accepts valid default_turn_policy", () => {
+    const result = sceneDefinitionSchema.parse({
+      ...valid,
+      default_turn_policy: {
+        policy_id: "living-room-default",
+        triggers: {
+          on_user_message: "all_present",
+          on_agent_message: {
+            mention: true,
+            random: true,
+            cooldown_ms: 5000,
+            max_consecutive: 2,
+          },
+        },
+      },
+    });
+    expect(result.default_turn_policy?.policy_id).toBe("living-room-default");
+  });
+
+  it("rejects invalid default_turn_policy structure", () => {
+    expect(() =>
+      sceneDefinitionSchema.parse({
+        ...valid,
+        default_turn_policy: { policy_id: "" },
+      }),
+    ).toThrow();
+  });
 });

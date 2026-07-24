@@ -20,6 +20,7 @@ for (const room of ROOMS) {
       prompt_weight_overrides: room.prompt_weight_overrides,
       max_participants: room.max_participants ?? null,
       furniture_slots: room.furniture_slots ?? null,
+      default_turn_policy: room.default_turn_policy ?? null,
     })
     .onConflictDoUpdate({
       target: scenes.scene_id,
@@ -29,6 +30,7 @@ for (const room of ROOMS) {
         prompt_weight_overrides: room.prompt_weight_overrides,
         max_participants: room.max_participants ?? null,
         furniture_slots: room.furniture_slots ?? null,
+        default_turn_policy: room.default_turn_policy ?? null,
       },
     });
 }

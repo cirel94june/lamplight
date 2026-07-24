@@ -23,6 +23,7 @@ async function seedRooms() {
         prompt_weight_overrides: room.prompt_weight_overrides,
         max_participants: room.max_participants ?? null,
         furniture_slots: room.furniture_slots ?? null,
+        default_turn_policy: room.default_turn_policy ?? null,
       })
       .onConflictDoUpdate({
         target: schema.scenes.scene_id,
@@ -32,6 +33,7 @@ async function seedRooms() {
           prompt_weight_overrides: room.prompt_weight_overrides,
           max_participants: room.max_participants ?? null,
           furniture_slots: room.furniture_slots ?? null,
+          default_turn_policy: room.default_turn_policy ?? null,
         },
       });
   }
@@ -72,6 +74,17 @@ describe("GET /scenes", () => {
     for (const room of body.data) {
       expect(() => sceneDefinitionSchema.parse(room)).not.toThrow();
     }
+  });
+
+  it("includes default_turn_policy in response", async () => {
+    const res = await app.request("/scenes", { headers: authHeaders });
+    const body = await res.json();
+    const livingRoom = body.data.find(
+      (r: { scene_id: string }) => r.scene_id === "room-living-room",
+    );
+    expect(livingRoom.default_turn_policy).toBeDefined();
+    expect(livingRoom.default_turn_policy.policy_id).toBe("living-room-default");
+    expect(livingRoom.default_turn_policy.triggers.on_agent_message.random).toBe(true);
   });
 
   it("does not expose created_at in response", async () => {

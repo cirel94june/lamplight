@@ -6,10 +6,7 @@ export function useScenes() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = import.meta.env.VITE_OWNER_TOKEN ?? "";
-    fetch("/api/scenes", {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    fetch("/api/scenes")
       .then((r) => r.json())
       .then((body) => {
         if (body.ok) setScenes(body.data);

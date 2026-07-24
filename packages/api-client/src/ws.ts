@@ -30,7 +30,9 @@ export class HouseWsClient {
 
   constructor(private readonly options: HouseWsOptions) {
     const wsUrl = new URL(options.url);
-    wsUrl.searchParams.set("token", options.token);
+    if (options.token) {
+      wsUrl.searchParams.set("token", options.token);
+    }
     this.url = wsUrl.toString();
     this.baseDelay = options.reconnectDelayMs ?? 1000;
     this.maxDelay = options.maxReconnectDelayMs ?? 30000;

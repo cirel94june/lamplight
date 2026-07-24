@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { mergeEvents } from "./merge.js";
 
 export interface HouseEventItem {
   id: string;
@@ -16,19 +17,18 @@ export function useEvents() {
   const [events, setEvents] = useState<HouseEventItem[]>([]);
 
   useEffect(() => {
-    const token = import.meta.env.VITE_OWNER_TOKEN ?? "";
-    fetch("/api/house-events?limit=50", {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    fetch("/api/house-events?limit=50")
       .then((r) => r.json())
       .then((body) => {
-        if (body.ok) setEvents(body.data);
+        if (body.ok) {
+          setEvents((prev) => mergeEvents(prev, body.data));
+        }
       });
   }, []);
 
-  const prependEvent = (event: HouseEventItem) => {
-    setEvents((prev) => [event, ...prev].slice(0, 200));
-  };
+  const prependEvent = useCallback((event: HouseEventItem) => {
+    setEvents((prev) => mergeEvents(prev, [event]));
+  }, []);
 
   return { events, prependEvent };
 }

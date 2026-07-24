@@ -10,7 +10,7 @@ export class AnthropicProvider implements AIGateway {
   private client: Anthropic;
 
   constructor(apiKey: string) {
-    this.client = new Anthropic({ apiKey });
+    this.client = new Anthropic({ apiKey, maxRetries: 0, timeout: 30_000 });
   }
 
   async complete(
@@ -79,6 +79,14 @@ export class AnthropicProvider implements AIGateway {
   }
 
   private mapError(error: unknown): GatewayError {
+    if (error instanceof Anthropic.APIConnectionTimeoutError) {
+      return {
+        code: "timeout",
+        message: error.message,
+        provider_id: "anthropic",
+        retryable: true,
+      };
+    }
     if (error instanceof Anthropic.APIError) {
       if (error.status === 429) {
         return {

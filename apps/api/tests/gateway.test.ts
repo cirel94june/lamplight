@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import type {
   AIGateway,
   GatewayCompletionRequest,
@@ -6,6 +8,8 @@ import type {
   GatewayError,
 } from "@lamplight/contracts";
 import { GatewayService } from "../src/services/gateway/gateway-service.js";
+import { AnthropicProvider } from "../src/services/gateway/anthropic-provider.js";
+import { OpenAIProvider } from "../src/services/gateway/openai-provider.js";
 
 function mockProvider(
   response: GatewayCompletionResponse,
@@ -192,5 +196,134 @@ describe("GatewayService", () => {
       expect.stringContaining("in=10 out=5"),
     );
     spy.mockRestore();
+  });
+});
+
+describe("AnthropicProvider — error mapping", () => {
+  it("maps APIConnectionTimeoutError to timeout + retryable", async () => {
+    const provider = new AnthropicProvider("fake-key");
+    // Stub the SDK call to throw a real timeout error
+    vi.spyOn(provider["client"].messages, "create").mockRejectedValue(
+      new Anthropic.APIConnectionTimeoutError({ message: "Request timed out" }),
+    );
+
+    try {
+      await provider.complete(baseRequest);
+      expect.fail("should have thrown");
+    } catch (error) {
+      const e = error as GatewayError;
+      expect(e.code).toBe("timeout");
+      expect(e.retryable).toBe(true);
+      expect(e.provider_id).toBe("anthropic");
+    }
+  });
+
+  it("maps 429 APIError to rate_limited + retryable", async () => {
+    const provider = new AnthropicProvider("fake-key");
+    vi.spyOn(provider["client"].messages, "create").mockRejectedValue(
+      new Anthropic.RateLimitError(429, undefined, "rate limited", undefined),
+    );
+
+    try {
+      await provider.complete(baseRequest);
+      expect.fail("should have thrown");
+    } catch (error) {
+      const e = error as GatewayError;
+      expect(e.code).toBe("rate_limited");
+      expect(e.retryable).toBe(true);
+    }
+  });
+
+  it("maps 400 APIError to invalid_request + not retryable", async () => {
+    const provider = new AnthropicProvider("fake-key");
+    vi.spyOn(provider["client"].messages, "create").mockRejectedValue(
+      new Anthropic.BadRequestError(400, undefined, "bad request", undefined),
+    );
+
+    try {
+      await provider.complete(baseRequest);
+      expect.fail("should have thrown");
+    } catch (error) {
+      const e = error as GatewayError;
+      expect(e.code).toBe("invalid_request");
+      expect(e.retryable).toBe(false);
+    }
+  });
+
+  it("SDK client is configured with maxRetries=0 and timeout=30s", () => {
+    const provider = new AnthropicProvider("fake-key");
+    const client = provider["client"];
+    expect(client.maxRetries).toBe(0);
+    expect(client.timeout).toBe(30_000);
+  });
+});
+
+describe("OpenAIProvider — error mapping", () => {
+  it("maps APIConnectionTimeoutError to timeout + retryable", async () => {
+    const provider = new OpenAIProvider("fake-key");
+    vi.spyOn(provider["client"].chat.completions, "create").mockRejectedValue(
+      new OpenAI.APIConnectionTimeoutError({ message: "Request timed out" }),
+    );
+
+    try {
+      await provider.complete({
+        ...baseRequest,
+        provider_id: "openai",
+        model_id: "gpt-4o",
+      });
+      expect.fail("should have thrown");
+    } catch (error) {
+      const e = error as GatewayError;
+      expect(e.code).toBe("timeout");
+      expect(e.retryable).toBe(true);
+      expect(e.provider_id).toBe("openai");
+    }
+  });
+
+  it("maps 429 APIError to rate_limited + retryable", async () => {
+    const provider = new OpenAIProvider("fake-key");
+    vi.spyOn(provider["client"].chat.completions, "create").mockRejectedValue(
+      new OpenAI.RateLimitError(429, undefined, "rate limited", undefined),
+    );
+
+    try {
+      await provider.complete({
+        ...baseRequest,
+        provider_id: "openai",
+        model_id: "gpt-4o",
+      });
+      expect.fail("should have thrown");
+    } catch (error) {
+      const e = error as GatewayError;
+      expect(e.code).toBe("rate_limited");
+      expect(e.retryable).toBe(true);
+    }
+  });
+
+  it("maps 400 APIError to invalid_request + not retryable", async () => {
+    const provider = new OpenAIProvider("fake-key");
+    vi.spyOn(provider["client"].chat.completions, "create").mockRejectedValue(
+      new OpenAI.BadRequestError(400, undefined, "bad request", undefined),
+    );
+
+    try {
+      await provider.complete({
+        ...baseRequest,
+        provider_id: "openai",
+        model_id: "gpt-4o",
+      });
+      expect.fail("should have thrown");
+    } catch (error) {
+      const e = error as GatewayError;
+      expect(e.code).toBe("invalid_request");
+      expect(e.retryable).toBe(false);
+    }
+  });
+
+  it("SDK client is configured with maxRetries=0 and timeout=30s", () => {
+    const provider = new OpenAIProvider("fake-key");
+    const client = provider["client"];
+    expect(client.maxRetries).toBe(0);
+    expect(client.timeout).toBe(30_000);
   });
 });

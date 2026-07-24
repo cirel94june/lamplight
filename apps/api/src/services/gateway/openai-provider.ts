@@ -10,7 +10,7 @@ export class OpenAIProvider implements AIGateway {
   private client: OpenAI;
 
   constructor(apiKey: string) {
-    this.client = new OpenAI({ apiKey });
+    this.client = new OpenAI({ apiKey, maxRetries: 0, timeout: 30_000 });
   }
 
   async complete(
@@ -77,6 +77,14 @@ export class OpenAIProvider implements AIGateway {
   }
 
   private mapError(error: unknown): GatewayError {
+    if (error instanceof OpenAI.APIConnectionTimeoutError) {
+      return {
+        code: "timeout",
+        message: error.message,
+        provider_id: "openai",
+        retryable: true,
+      };
+    }
     if (error instanceof OpenAI.APIError) {
       if (error.status === 429) {
         return {

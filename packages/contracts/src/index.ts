@@ -9,3 +9,6 @@ export * from "./memory.js";
 export * from "./game.js";
 export * from "./agent.js";
 export * from "./tool.js";
+export * from "./turn-policy.js";
+export * from "./gateway.js";
+export * from "./memory-adapter.js";

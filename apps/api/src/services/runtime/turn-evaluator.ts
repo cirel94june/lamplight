@@ -1,4 +1,4 @@
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, ne } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import type { TurnPolicy, TurnEvaluation } from "@lamplight/contracts";
 import * as schema from "../../db/schema.js";
@@ -111,6 +111,7 @@ export class TurnEvaluator {
       if (recentConsecutive < rules.max_consecutive) {
         const lastAgentMessageTime = await this.getLastAgentMessageTime(
           opts.conversation_id,
+          opts.message_id,
         );
         const cooldownOk =
           !lastAgentMessageTime ||
@@ -119,7 +120,8 @@ export class TurnEvaluator {
         if (cooldownOk) {
           const affinities = await this.getAgentAffinities(candidates);
           for (const id of candidates) {
-            if ((affinities.get(id) ?? 0) > 0) {
+            const affinity = affinities.get(id) ?? 0;
+            if (affinity > 0 && Math.random() < affinity) {
               eligible.add(id);
             }
           }
@@ -208,16 +210,19 @@ export class TurnEvaluator {
 
   private async getLastAgentMessageTime(
     conversationId: string,
+    excludeMessageId?: string,
   ): Promise<string | null> {
+    const conditions = [
+      eq(schema.messages.conversation_id, conversationId),
+      eq(schema.messages.sender_type, "ai"),
+    ];
+    if (excludeMessageId) {
+      conditions.push(ne(schema.messages.id, excludeMessageId));
+    }
     const rows = await this.deps.db
       .select({ created_at: schema.messages.created_at })
       .from(schema.messages)
-      .where(
-        and(
-          eq(schema.messages.conversation_id, conversationId),
-          eq(schema.messages.sender_type, "ai"),
-        ),
-      )
+      .where(and(...conditions))
       .orderBy(desc(schema.messages.created_at))
       .limit(1);
 

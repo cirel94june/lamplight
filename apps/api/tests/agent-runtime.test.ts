@@ -588,9 +588,8 @@ describe("Agent Runtime integration", () => {
     });
   });
 
-  describe("阻塞项修复：random_reply_affinity=0 不应被随机选中", () => {
+  describe("阻塞项修复：affinity 作为概率权重", () => {
     beforeEach(async () => {
-      // Place therapist (affinity=0) and xiaoke (affinity=0.7) in living room
       await db.insert(schema.aiPresence).values([
         { ai_id: "therapist", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
         { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
@@ -607,15 +606,67 @@ describe("Agent Runtime integration", () => {
       });
     });
 
-    it("therapist (affinity=0) is excluded from random eligible list", async () => {
+    it("affinity=0 agent is never selected", async () => {
+      const spy = vi.spyOn(Math, "random").mockReturnValue(0.01);
       const evaluation = await turnEvaluator.evaluateAgentMessage({
         conversation_id: "conv-affinity",
         message_id: "msg-ai-trigger",
         sender_agent_id: "xiaoke",
         scene_id: "room-living-room",
       });
-
       expect(evaluation.eligible_agent_ids).not.toContain("therapist");
+      spy.mockRestore();
+    });
+
+    it("affinity=0 agent still excluded even with low roll", async () => {
+      // roll=0.0 would pass any non-zero affinity, but therapist has affinity=0
+      const spy = vi.spyOn(Math, "random").mockReturnValue(0.0);
+      const evaluation = await turnEvaluator.evaluateAgentMessage({
+        conversation_id: "conv-affinity",
+        message_id: "msg-ai-trigger",
+        sender_agent_id: "xiaoke",
+        scene_id: "room-living-room",
+      });
+      // therapist affinity=0 → 0 > 0 is false → always excluded
+      expect(evaluation.eligible_agent_ids).not.toContain("therapist");
+      spy.mockRestore();
+    });
+
+    it("affinity=0.7 agent rejected when roll >= 0.7", async () => {
+      // Put lucien (affinity=0.5) and jasper (affinity=0.6) in scene
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+      ]);
+      await db.run(sql`UPDATE conversations SET participant_ai_ids = '["therapist","xiaoke","lucien"]' WHERE id = 'conv-affinity'`);
+
+      // roll=0.65 → lucien (0.5): 0.65 >= 0.5 → rejected
+      const spy = vi.spyOn(Math, "random").mockReturnValue(0.65);
+      const evaluation = await turnEvaluator.evaluateAgentMessage({
+        conversation_id: "conv-affinity",
+        message_id: "msg-ai-trigger",
+        sender_agent_id: "xiaoke",
+        scene_id: "room-living-room",
+      });
+      expect(evaluation.eligible_agent_ids).not.toContain("lucien");
+      spy.mockRestore();
+    });
+
+    it("affinity=0.5 agent selected when roll < 0.5", async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+      ]);
+      await db.run(sql`UPDATE conversations SET participant_ai_ids = '["therapist","xiaoke","lucien"]' WHERE id = 'conv-affinity'`);
+
+      // roll=0.3 → lucien (0.5): 0.3 < 0.5 → selected
+      const spy = vi.spyOn(Math, "random").mockReturnValue(0.3);
+      const evaluation = await turnEvaluator.evaluateAgentMessage({
+        conversation_id: "conv-affinity",
+        message_id: "msg-ai-trigger",
+        sender_agent_id: "xiaoke",
+        scene_id: "room-living-room",
+      });
+      expect(evaluation.eligible_agent_ids).toContain("lucien");
+      spy.mockRestore();
     });
   });
 
@@ -728,6 +779,7 @@ describe("Agent Runtime integration", () => {
       });
 
       // Only 1 consecutive AI message (after user break), max_consecutive=2
+      const spy = vi.spyOn(Math, "random").mockReturnValue(0.1);
       const evaluation = await turnEvaluator.evaluateAgentMessage({
         conversation_id: "conv-consecutive",
         message_id: "msg-ai-after",
@@ -735,8 +787,52 @@ describe("Agent Runtime integration", () => {
         scene_id: "room-living-room",
       });
 
-      // xiaoke has affinity > 0, should be eligible via random
+      // xiaoke has affinity 0.7, roll=0.1 < 0.7 → selected
       expect(evaluation.eligible_agent_ids).toContain("xiaoke");
+      spy.mockRestore();
+    });
+
+    it("cooldown excludes the trigger message itself from last-AI-time check", async () => {
+      const longAgo = new Date(Date.now() - 120_000).toISOString();
+      const justNow = new Date().toISOString();
+
+      // User message long ago
+      await conversationRepo.createMessage({
+        id: "msg-user-cd",
+        conversation_id: "conv-consecutive",
+        conversation_kind: "house_chat",
+        sender_type: "user",
+        content: "hello",
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: longAgo,
+      });
+      // Trigger AI message just written (this is the message being evaluated)
+      await conversationRepo.createMessage({
+        id: "msg-trigger-cd",
+        conversation_id: "conv-consecutive",
+        conversation_kind: "house_chat",
+        sender_type: "ai",
+        sender_ai_id: "lucien",
+        content: "trigger reply",
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: justNow,
+      });
+
+      // cooldown_ms=5000; without exclusion, trigger's timestamp (just now) would
+      // make cooldown fail. With exclusion, no prior AI message → cooldown passes.
+      const spy = vi.spyOn(Math, "random").mockReturnValue(0.1);
+      const evaluation = await turnEvaluator.evaluateAgentMessage({
+        conversation_id: "conv-consecutive",
+        message_id: "msg-trigger-cd",
+        sender_agent_id: "lucien",
+        scene_id: "room-living-room",
+      });
+
+      // xiaoke (affinity=0.7, roll=0.1) should be eligible — cooldown must not block
+      expect(evaluation.eligible_agent_ids).toContain("xiaoke");
+      spy.mockRestore();
     });
   });
 

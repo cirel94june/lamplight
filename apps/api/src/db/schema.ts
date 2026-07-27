@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const scenes = sqliteTable("scenes", {
   scene_id: text("scene_id").primaryKey(),
@@ -75,7 +75,11 @@ export const conversations = sqliteTable("conversations", {
   status: text("status").notNull().default("active"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
-});
+}, (table) => [
+  uniqueIndex("idx_conversations_active_scene")
+    .on(table.scene_id)
+    .where(sql`status = 'active'`),
+]);
 
 export const messages = sqliteTable("messages", {
   id: text("id").primaryKey(),

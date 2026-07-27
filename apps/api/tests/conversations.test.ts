@@ -80,6 +80,24 @@ describe("Conversation API", () => {
       expect(res.status).toBe(404);
     });
 
+    it("returns 409 when scene already has an active conversation", async () => {
+      const res1 = await app.request("/conversations", {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ scene_id: "room-living-room" }),
+      });
+      expect(res1.status).toBe(201);
+
+      const res2 = await app.request("/conversations", {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ scene_id: "room-living-room" }),
+      });
+      expect(res2.status).toBe(409);
+      const body = await res2.json();
+      expect(body.error.code).toBe("CONFLICT");
+    });
+
     it("returns 400 without scene_id", async () => {
       const res = await app.request("/conversations", {
         method: "POST",
@@ -171,6 +189,26 @@ describe("Conversation API", () => {
       });
 
       expect(res.status).toBe(404);
+    });
+
+    it("rejects malformed mentioned_agent_ids", async () => {
+      const createRes = await app.request("/conversations", {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ scene_id: "room-living-room" }),
+      });
+      const { data: conv } = await createRes.json();
+
+      const res = await app.request(`/conversations/${conv.id}/messages`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "hello", mentioned_agent_ids: [{ id: "xiaoke" }] }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("VALIDATION_ERROR");
+      expect(body.error.message).toContain("string array");
     });
 
     it("rejects messages to archived conversation", async () => {

@@ -18,6 +18,17 @@ export class LamplightWebAdapter {
     payload: WebClientPayload,
     conversationKind: ConversationKind,
   ): InternalMessage {
+    let mentionedAgentIds: string[] | undefined;
+    if (payload.mentioned_agent_ids !== undefined) {
+      if (
+        !Array.isArray(payload.mentioned_agent_ids) ||
+        !payload.mentioned_agent_ids.every((v): v is string => typeof v === "string")
+      ) {
+        throw new TypeError("mentioned_agent_ids must be a string array");
+      }
+      mentionedAgentIds = payload.mentioned_agent_ids;
+    }
+
     return {
       content: payload.content,
       sender_type: "user",
@@ -26,7 +37,7 @@ export class LamplightWebAdapter {
         set_by: "server",
       },
       conversation_kind: conversationKind,
-      mentioned_agent_ids: payload.mentioned_agent_ids,
+      mentioned_agent_ids: mentionedAgentIds,
     };
   }
 }

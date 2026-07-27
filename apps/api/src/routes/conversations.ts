@@ -119,6 +119,24 @@ conversations.post("/", async (c) => {
     );
   }
 
+  const [existingActive] = await db
+    .select()
+    .from(schema.conversations)
+    .where(
+      and(
+        eq(schema.conversations.scene_id, scene_id),
+        eq(schema.conversations.status, "active"),
+      ),
+    )
+    .limit(1);
+
+  if (existingActive) {
+    return c.json(
+      { ok: false, error: { code: "CONFLICT", message: "scene already has an active conversation" } },
+      409,
+    );
+  }
+
   const presenceRows = await db
     .select({ ai_id: schema.aiPresence.ai_id })
     .from(schema.aiPresence)
@@ -270,10 +288,21 @@ conversations.post("/:id/messages", async (c) => {
     );
   }
 
-  const internal = webAdapter.toInternal(
-    { content: content.trim(), mentioned_agent_ids },
-    conv.kind as import("@lamplight/contracts").ConversationKind,
-  );
+  let internal;
+  try {
+    internal = webAdapter.toInternal(
+      { content: content.trim(), mentioned_agent_ids },
+      conv.kind as import("@lamplight/contracts").ConversationKind,
+    );
+  } catch (err) {
+    if (err instanceof TypeError) {
+      return c.json(
+        { ok: false, error: { code: "VALIDATION_ERROR", message: err.message } },
+        400,
+      );
+    }
+    throw err;
+  }
 
   const messageId = `msg_${randomUUID()}`;
   const now = new Date().toISOString();

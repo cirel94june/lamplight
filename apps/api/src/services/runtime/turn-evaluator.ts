@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import type { TurnPolicy, TurnEvaluation } from "@lamplight/contracts";
 import * as schema from "../../db/schema.js";
@@ -107,7 +107,6 @@ export class TurnEvaluator {
     if (rules.random) {
       const recentConsecutive = await this.getConsecutiveAgentMessageCount(
         opts.conversation_id,
-        opts.sender_agent_id,
       );
       if (recentConsecutive < rules.max_consecutive) {
         const lastAgentMessageTime = await this.getLastAgentMessageTime(
@@ -118,8 +117,11 @@ export class TurnEvaluator {
           Date.now() - new Date(lastAgentMessageTime).getTime() >= rules.cooldown_ms;
 
         if (cooldownOk) {
+          const affinities = await this.getAgentAffinities(candidates);
           for (const id of candidates) {
-            eligible.add(id);
+            if ((affinities.get(id) ?? 0) > 0) {
+              eligible.add(id);
+            }
           }
         }
       }
@@ -183,7 +185,6 @@ export class TurnEvaluator {
 
   private async getConsecutiveAgentMessageCount(
     conversationId: string,
-    _excludeAgentId: string,
   ): Promise<number> {
     const recent = await this.deps.db
       .select({
@@ -191,12 +192,12 @@ export class TurnEvaluator {
       })
       .from(schema.messages)
       .where(eq(schema.messages.conversation_id, conversationId))
-      .orderBy(schema.messages.created_at)
+      .orderBy(desc(schema.messages.created_at))
       .limit(10);
 
     let count = 0;
-    for (let i = recent.length - 1; i >= 0; i--) {
-      if (recent[i].sender_type === "ai") {
+    for (const row of recent) {
+      if (row.sender_type === "ai") {
         count++;
       } else {
         break;
@@ -211,11 +212,32 @@ export class TurnEvaluator {
     const rows = await this.deps.db
       .select({ created_at: schema.messages.created_at })
       .from(schema.messages)
-      .where(eq(schema.messages.conversation_id, conversationId))
-      .orderBy(schema.messages.created_at)
+      .where(
+        and(
+          eq(schema.messages.conversation_id, conversationId),
+          eq(schema.messages.sender_type, "ai"),
+        ),
+      )
+      .orderBy(desc(schema.messages.created_at))
       .limit(1);
 
-    const last = rows[rows.length - 1];
-    return last?.created_at ?? null;
+    return rows[0]?.created_at ?? null;
+  }
+
+  private async getAgentAffinities(
+    agentIds: string[],
+  ): Promise<Map<string, number>> {
+    const result = new Map<string, number>();
+    if (agentIds.length === 0) return result;
+
+    for (const id of agentIds) {
+      const rows = await this.deps.db
+        .select({ random_reply_affinity: schema.agentRuntimeConfigs.random_reply_affinity })
+        .from(schema.agentRuntimeConfigs)
+        .where(eq(schema.agentRuntimeConfigs.agent_id, id))
+        .limit(1);
+      result.set(id, rows[0]?.random_reply_affinity ?? 0);
+    }
+    return result;
   }
 }

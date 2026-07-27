@@ -587,4 +587,276 @@ describe("Agent Runtime integration", () => {
       expect(result.private_notes).toEqual([]);
     });
   });
+
+  describe("阻塞项修复：random_reply_affinity=0 不应被随机选中", () => {
+    beforeEach(async () => {
+      // Place therapist (affinity=0) and xiaoke (affinity=0.7) in living room
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "therapist", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-affinity",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["therapist", "xiaoke"],
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    });
+
+    it("therapist (affinity=0) is excluded from random eligible list", async () => {
+      const evaluation = await turnEvaluator.evaluateAgentMessage({
+        conversation_id: "conv-affinity",
+        message_id: "msg-ai-trigger",
+        sender_agent_id: "xiaoke",
+        scene_id: "room-living-room",
+      });
+
+      expect(evaluation.eligible_agent_ids).not.toContain("therapist");
+    });
+  });
+
+  describe("阻塞项修复：cooldown/max_consecutive 查最近历史", () => {
+    beforeEach(async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-consecutive",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["xiaoke", "lucien"],
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    });
+
+    it("max_consecutive blocks random when recent tail is all AI messages", async () => {
+      const past = new Date(Date.now() - 60_000).toISOString();
+      const pastPlus1 = new Date(Date.now() - 59_000).toISOString();
+      const pastPlus2 = new Date(Date.now() - 58_000).toISOString();
+
+      // Insert: user msg, then 2 AI messages (max_consecutive=2 for living room)
+      await conversationRepo.createMessage({
+        id: "msg-old-user",
+        conversation_id: "conv-consecutive",
+        conversation_kind: "house_chat",
+        sender_type: "user",
+        content: "hi",
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: past,
+      });
+      await conversationRepo.createMessage({
+        id: "msg-ai-1",
+        conversation_id: "conv-consecutive",
+        conversation_kind: "house_chat",
+        sender_type: "ai",
+        sender_ai_id: "xiaoke",
+        content: "reply 1",
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: pastPlus1,
+      });
+      await conversationRepo.createMessage({
+        id: "msg-ai-2",
+        conversation_id: "conv-consecutive",
+        conversation_kind: "house_chat",
+        sender_type: "ai",
+        sender_ai_id: "lucien",
+        content: "reply 2",
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: pastPlus2,
+      });
+
+      // Living room max_consecutive=2, there are already 2 consecutive AI messages
+      const evaluation = await turnEvaluator.evaluateAgentMessage({
+        conversation_id: "conv-consecutive",
+        message_id: "msg-ai-2",
+        sender_agent_id: "lucien",
+        scene_id: "room-living-room",
+      });
+
+      // Random should be blocked because consecutive count (2) >= max_consecutive (2)
+      // Only mention path could add agents
+      expect(evaluation.eligible_agent_ids).not.toContain("xiaoke");
+    });
+
+    it("max_consecutive allows random when user message breaks the streak", async () => {
+      const past = new Date(Date.now() - 60_000).toISOString();
+      const pastPlus1 = new Date(Date.now() - 59_000).toISOString();
+      const pastPlus2 = new Date(Date.now() - 58_000).toISOString();
+
+      await conversationRepo.createMessage({
+        id: "msg-ai-old",
+        conversation_id: "conv-consecutive",
+        conversation_kind: "house_chat",
+        sender_type: "ai",
+        sender_ai_id: "xiaoke",
+        content: "old reply",
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: past,
+      });
+      await conversationRepo.createMessage({
+        id: "msg-user-break",
+        conversation_id: "conv-consecutive",
+        conversation_kind: "house_chat",
+        sender_type: "user",
+        content: "user breaks streak",
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: pastPlus1,
+      });
+      await conversationRepo.createMessage({
+        id: "msg-ai-after",
+        conversation_id: "conv-consecutive",
+        conversation_kind: "house_chat",
+        sender_type: "ai",
+        sender_ai_id: "lucien",
+        content: "new reply",
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: pastPlus2,
+      });
+
+      // Only 1 consecutive AI message (after user break), max_consecutive=2
+      const evaluation = await turnEvaluator.evaluateAgentMessage({
+        conversation_id: "conv-consecutive",
+        message_id: "msg-ai-after",
+        sender_agent_id: "lucien",
+        scene_id: "room-living-room",
+      });
+
+      // xiaoke has affinity > 0, should be eligible via random
+      expect(evaluation.eligible_agent_ids).toContain("xiaoke");
+    });
+  });
+
+  describe("阻塞项修复：单 agent 失败不拖垮整批", () => {
+    it("one agent gateway failure does not block other agents", async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-fail",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["xiaoke", "lucien"],
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      await conversationRepo.createMessage({
+        id: "msg-user-fail",
+        conversation_id: "conv-fail",
+        conversation_kind: "house_chat",
+        sender_type: "user",
+        content: "hello",
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: new Date().toISOString(),
+      });
+
+      // Make gateway fail for the first call, succeed for the second
+      let callCount = 0;
+      const failingGateway: AIGateway = {
+        complete: vi.fn().mockImplementation(async (req: GatewayCompletionRequest) => {
+          callCount++;
+          if (callCount === 1) {
+            throw new Error("simulated gateway failure");
+          }
+          return {
+            content: "success",
+            usage: { input_tokens: 1, output_tokens: 1 },
+            model_id: req.model_id,
+            provider_id: req.provider_id,
+            finish_reason: "end_turn",
+          } satisfies GatewayCompletionResponse;
+        }),
+      };
+
+      const failRuntime = new AgentRuntime({
+        gateway: failingGateway,
+        contextBuilder,
+        conversationRepo,
+      });
+
+      const evaluation = await turnEvaluator.evaluateUserMessage({
+        conversation_id: "conv-fail",
+        message_id: "msg-user-fail",
+        scene_id: "room-living-room",
+      });
+
+      // Should NOT throw, and should return 1 successful response
+      const responses = await failRuntime.processEvaluation(evaluation, {
+        scene_id: "room-living-room",
+        conversation_kind: "house_chat",
+      });
+
+      expect(responses).toHaveLength(1);
+    });
+  });
+
+  describe("阻塞项修复：message ID 使用 UUID 避免冲突", () => {
+    it("parallel agent responses produce unique message IDs", async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "jasper", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-uuid",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["xiaoke", "lucien", "jasper"],
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      await conversationRepo.createMessage({
+        id: "msg-user-uuid",
+        conversation_id: "conv-uuid",
+        conversation_kind: "house_chat",
+        sender_type: "user",
+        content: "test",
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: new Date().toISOString(),
+      });
+
+      const evaluation = await turnEvaluator.evaluateUserMessage({
+        conversation_id: "conv-uuid",
+        message_id: "msg-user-uuid",
+        scene_id: "room-living-room",
+      });
+
+      const responses = await runtime.processEvaluation(evaluation, {
+        scene_id: "room-living-room",
+        conversation_kind: "house_chat",
+      });
+
+      // All 3 agents responded with unique IDs
+      expect(responses).toHaveLength(3);
+      const ids = new Set(responses.map((r) => r.message_id));
+      expect(ids.size).toBe(3);
+
+      // IDs should start with msg_ and contain UUID format
+      for (const r of responses) {
+        expect(r.message_id).toMatch(/^msg_[0-9a-f-]{36}$/);
+      }
+    });
+  });
 });

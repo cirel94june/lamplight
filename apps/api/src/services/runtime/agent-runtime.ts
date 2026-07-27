@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   AIGateway,
   TurnEvaluation,
@@ -52,62 +53,62 @@ export class AgentRuntime {
     evaluation: TurnEvaluation,
     opts: { scene_id?: string; conversation_kind: string },
   ): Promise<AgentResponse | null> {
-    const providerConfig =
-      await this.deps.contextBuilder.getProviderConfig(agentId);
-    if (!providerConfig) {
-      console.error(`[runtime] no provider config for agent ${agentId}`);
-      return null;
-    }
-
-    const runtimeConfig =
-      await this.deps.contextBuilder.getRuntimeConfig(agentId);
-
-    const messages = await this.deps.contextBuilder.build({
-      agent_id: agentId,
-      conversation_id: evaluation.conversation_id,
-      scene_id: opts.scene_id,
-      conversation_kind: opts.conversation_kind as "house_chat",
-    });
-
-    let response: GatewayCompletionResponse;
     try {
-      response = await this.deps.gateway.complete({
-        provider_id: providerConfig.provider_id,
-        model_id: providerConfig.model_id,
-        messages,
-        max_tokens: runtimeConfig?.max_response_tokens ?? undefined,
-        temperature: runtimeConfig?.temperature ?? undefined,
+      const providerConfig =
+        await this.deps.contextBuilder.getProviderConfig(agentId);
+      if (!providerConfig) {
+        console.error(`[runtime] no provider config for agent ${agentId}`);
+        return null;
+      }
+
+      const runtimeConfig =
+        await this.deps.contextBuilder.getRuntimeConfig(agentId);
+
+      const messages = await this.deps.contextBuilder.build({
+        agent_id: agentId,
+        conversation_id: evaluation.conversation_id,
+        scene_id: opts.scene_id,
+        conversation_kind: opts.conversation_kind as "house_chat",
       });
+
+      const response: GatewayCompletionResponse =
+        await this.deps.gateway.complete({
+          provider_id: providerConfig.provider_id,
+          model_id: providerConfig.model_id,
+          messages,
+          max_tokens: runtimeConfig?.max_response_tokens ?? undefined,
+          temperature: runtimeConfig?.temperature ?? undefined,
+        });
+
+      const messageId = `msg_${randomUUID()}`;
+      const now = new Date().toISOString();
+
+      await this.deps.conversationRepo.createMessage({
+        id: messageId,
+        conversation_id: evaluation.conversation_id,
+        conversation_kind: opts.conversation_kind,
+        sender_type: "ai",
+        sender_ai_id: agentId,
+        content: response.content,
+        context_type: "out_of_world",
+        context_set_by: "server",
+        prompt_snapshot: {
+          model: response.model_id,
+          rendered_prompt: messages[0]?.content ?? "",
+          created_at: now,
+        },
+        created_at: now,
+      });
+
+      return {
+        agent_id: agentId,
+        message_id: messageId,
+        content: response.content,
+        usage: response.usage,
+      };
     } catch (error) {
-      console.error(`[runtime] gateway error for agent ${agentId}:`, error);
+      console.error(`[runtime] agent ${agentId} failed:`, error);
       return null;
     }
-
-    const messageId = `msg_${Date.now()}_${agentId}`;
-    const now = new Date().toISOString();
-
-    await this.deps.conversationRepo.createMessage({
-      id: messageId,
-      conversation_id: evaluation.conversation_id,
-      conversation_kind: opts.conversation_kind,
-      sender_type: "ai",
-      sender_ai_id: agentId,
-      content: response.content,
-      context_type: "out_of_world",
-      context_set_by: "server",
-      prompt_snapshot: {
-        model: response.model_id,
-        rendered_prompt: messages[0]?.content ?? "",
-        created_at: now,
-      },
-      created_at: now,
-    });
-
-    return {
-      agent_id: agentId,
-      message_id: messageId,
-      content: response.content,
-      usage: response.usage,
-    };
   }
 }

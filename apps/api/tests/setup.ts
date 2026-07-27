@@ -36,4 +36,53 @@ beforeAll(async () => {
     state TEXT NOT NULL DEFAULT 'idle',
     updated_at TEXT NOT NULL
   )`);
+
+  await db.run(sql`CREATE TABLE IF NOT EXISTS agent_profiles (
+    agent_id TEXT PRIMARY KEY NOT NULL,
+    display_name TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    memory_scope TEXT NOT NULL,
+    tool_policy_id TEXT,
+    prompt_version TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+
+  await db.run(sql`CREATE TABLE IF NOT EXISTS agent_runtime_configs (
+    agent_id TEXT PRIMARY KEY NOT NULL,
+    random_reply_affinity REAL NOT NULL,
+    max_response_tokens INTEGER,
+    temperature REAL,
+    system_prompt_template TEXT
+  )`);
+
+  await db.run(sql`CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY NOT NULL,
+    kind TEXT NOT NULL,
+    scene_id TEXT,
+    world_id TEXT,
+    session_id TEXT,
+    participant_ai_ids TEXT NOT NULL,
+    turn_policy TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+
+  await db.run(sql`CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY NOT NULL,
+    conversation_id TEXT NOT NULL,
+    conversation_kind TEXT NOT NULL,
+    sender_type TEXT NOT NULL,
+    sender_ai_id TEXT,
+    content TEXT NOT NULL,
+    context_type TEXT NOT NULL,
+    context_world_id TEXT,
+    context_session_id TEXT,
+    context_branch_id TEXT,
+    context_set_by TEXT NOT NULL DEFAULT 'server',
+    speech_mode TEXT,
+    prompt_snapshot TEXT,
+    created_at TEXT NOT NULL
+  )`);
 });

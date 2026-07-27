@@ -836,6 +836,68 @@ describe("Agent Runtime integration", () => {
     });
   });
 
+  describe("阻塞项修复：同时间戳 id DESC 次级排序", () => {
+    beforeEach(async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-tiebreak",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["xiaoke", "lucien"],
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    });
+
+    it("same-timestamp user+AI messages are ordered by id, consecutive count is correct", async () => {
+      const sameTime = new Date(Date.now() - 30_000).toISOString();
+
+      // user message and AI message share the same created_at
+      // id "msg-b-user" > "msg-a-ai" lexicographically, so user is "newer"
+      await conversationRepo.createMessage({
+        id: "msg-a-ai",
+        conversation_id: "conv-tiebreak",
+        conversation_kind: "house_chat",
+        sender_type: "ai",
+        sender_ai_id: "xiaoke",
+        content: "ai reply",
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: sameTime,
+      });
+      await conversationRepo.createMessage({
+        id: "msg-b-user",
+        conversation_id: "conv-tiebreak",
+        conversation_kind: "house_chat",
+        sender_type: "user",
+        content: "user msg",
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: sameTime,
+      });
+
+      // With id DESC tiebreaker: msg-b-user comes first → consecutive AI count = 0
+      // Without tiebreaker: order is nondeterministic, could wrongly count 1
+      const spy = vi.spyOn(Math, "random").mockReturnValue(0.1);
+      const evaluation = await turnEvaluator.evaluateAgentMessage({
+        conversation_id: "conv-tiebreak",
+        message_id: "msg-b-user",
+        sender_agent_id: "xiaoke",
+        scene_id: "room-living-room",
+      });
+
+      // consecutive=0 < max_consecutive=2, random path should run
+      // lucien (affinity=0.5, roll=0.1) should be eligible
+      expect(evaluation.eligible_agent_ids).toContain("lucien");
+      spy.mockRestore();
+    });
+  });
+
   describe("阻塞项修复：单 agent 失败不拖垮整批", () => {
     it("one agent gateway failure does not block other agents", async () => {
       await db.insert(schema.aiPresence).values([

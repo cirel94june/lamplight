@@ -194,7 +194,7 @@ export class TurnEvaluator {
       })
       .from(schema.messages)
       .where(eq(schema.messages.conversation_id, conversationId))
-      .orderBy(desc(schema.messages.created_at))
+      .orderBy(desc(schema.messages.created_at), desc(schema.messages.id))
       .limit(10);
 
     let count = 0;
@@ -223,7 +223,7 @@ export class TurnEvaluator {
       .select({ created_at: schema.messages.created_at })
       .from(schema.messages)
       .where(and(...conditions))
-      .orderBy(desc(schema.messages.created_at))
+      .orderBy(desc(schema.messages.created_at), desc(schema.messages.id))
       .limit(1);
 
     return rows[0]?.created_at ?? null;

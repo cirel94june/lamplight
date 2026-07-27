@@ -2,7 +2,10 @@ import { WebSocket } from "ws";
 
 export type BroadcastMessage =
   | { type: "house_event"; data: Record<string, unknown> }
-  | { type: "presence_update"; data: Record<string, unknown> };
+  | { type: "presence_update"; data: Record<string, unknown> }
+  | { type: "new_message"; data: Record<string, unknown> }
+  | { type: "agent_typing"; data: { conversation_id: string; agent_id: string } }
+  | { type: "agent_done"; data: { conversation_id: string; agent_id: string; message_id: string } };
 
 const clients = new Set<WebSocket>();
 

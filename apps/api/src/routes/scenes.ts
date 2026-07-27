@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db, schema } from "../db/index.js";
 
 type SceneRow = typeof schema.scenes.$inferSelect;
@@ -50,7 +50,30 @@ scenes.get("/:id/conversation", async (c) => {
     );
   }
 
-  const [existing] = await db
+  const presenceRows = await db
+    .select({ ai_id: schema.aiPresence.ai_id })
+    .from(schema.aiPresence)
+    .where(
+      and(
+        eq(schema.aiPresence.scene_id, sceneId),
+        eq(schema.aiPresence.state, "active"),
+      ),
+    );
+
+  const participantAiIds = presenceRows.map((r) => r.ai_id);
+  const now = new Date().toISOString();
+  const id = `conv_${randomUUID()}`;
+
+  // INSERT ON CONFLICT DO NOTHING — partial unique index prevents duplicates
+  await db.run(
+    sql`INSERT INTO conversations (id, kind, scene_id, participant_ai_ids, turn_policy, status, created_at, updated_at)
+        VALUES (${id}, 'house_chat', ${sceneId}, ${JSON.stringify(participantAiIds)},
+                ${scene.default_turn_policy ? JSON.stringify(scene.default_turn_policy) : null},
+                'active', ${now}, ${now})
+        ON CONFLICT DO NOTHING`,
+  );
+
+  const [conv] = await db
     .select()
     .from(schema.conversations)
     .where(
@@ -61,48 +84,7 @@ scenes.get("/:id/conversation", async (c) => {
     )
     .limit(1);
 
-  if (existing) {
-    return c.json({
-      ok: true,
-      data: {
-        id: existing.id,
-        kind: existing.kind,
-        scene_id: existing.scene_id ?? undefined,
-        participant_ai_ids: existing.participant_ai_ids,
-        turn_policy: existing.turn_policy ?? undefined,
-        status: existing.status,
-        created_at: existing.created_at,
-        updated_at: existing.updated_at,
-      },
-    });
-  }
-
-  const presenceRows = await db
-    .select({ ai_id: schema.aiPresence.ai_id })
-    .from(schema.aiPresence)
-    .where(eq(schema.aiPresence.scene_id, sceneId));
-
-  const participantAiIds = presenceRows.map((r) => r.ai_id);
-  const now = new Date().toISOString();
-  const id = `conv_${randomUUID()}`;
-
-  await db.insert(schema.conversations).values({
-    id,
-    kind: "house_chat",
-    scene_id: sceneId,
-    participant_ai_ids: participantAiIds,
-    turn_policy: scene.default_turn_policy as Record<string, unknown> | null,
-    status: "active",
-    created_at: now,
-    updated_at: now,
-  });
-
-  const [conv] = await db
-    .select()
-    .from(schema.conversations)
-    .where(eq(schema.conversations.id, id))
-    .limit(1);
-
+  const created = conv.id === id;
   return c.json({
     ok: true,
     data: {
@@ -115,7 +97,7 @@ scenes.get("/:id/conversation", async (c) => {
       created_at: conv.created_at,
       updated_at: conv.updated_at,
     },
-  }, 201);
+  }, created ? 201 : 200);
 });
 
 export { scenes };

@@ -1,7 +1,8 @@
-import { describe, expect, it, beforeAll, beforeEach, vi } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach, vi, afterEach } from "vitest";
 import { app } from "../src/app.js";
 import { db, schema } from "../src/db/index.js";
 import { sql } from "drizzle-orm";
+import * as broadcastModule from "../src/broadcast.js";
 
 const TOKEN = "test-token-123";
 
@@ -36,8 +37,8 @@ async function seedScene() {
 async function seedPresence() {
   await db.run(sql`DELETE FROM ai_presence`);
   await db.insert(schema.aiPresence).values([
-    { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
-    { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+    { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+    { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
   ]);
 }
 
@@ -347,6 +348,163 @@ describe("Conversation API", () => {
       expect(res.status).toBe(201);
       const body = await res.json();
       expect(body.data.conversation_kind).toBe("house_chat");
+    });
+  });
+
+  describe("active-only presence filtering", () => {
+    it("excludes idle/away agents from conversation participants", async () => {
+      await db.run(sql`DELETE FROM ai_presence`);
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "jasper", scene_id: "room-living-room", state: "away", updated_at: new Date().toISOString() },
+      ]);
+
+      const res = await app.request("/conversations", {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ scene_id: "room-living-room" }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.data.participant_ai_ids).toContain("xiaoke");
+      expect(body.data.participant_ai_ids).not.toContain("lucien");
+      expect(body.data.participant_ai_ids).not.toContain("jasper");
+    });
+
+    it("GET /scenes/:id/conversation also excludes non-active agents", async () => {
+      await db.run(sql`DELETE FROM ai_presence`);
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+      ]);
+
+      const res = await app.request("/scenes/room-living-room/conversation", {
+        headers: authHeaders,
+      });
+
+      const body = await res.json();
+      expect(body.data.participant_ai_ids).toContain("xiaoke");
+      expect(body.data.participant_ai_ids).not.toContain("lucien");
+    });
+  });
+
+  describe("concurrent get-or-create safety", () => {
+    it("parallel requests produce exactly one active conversation", async () => {
+      const requests = Array.from({ length: 8 }, () =>
+        app.request("/scenes/room-living-room/conversation", {
+          headers: authHeaders,
+        }),
+      );
+
+      const responses = await Promise.all(requests);
+      const bodies = await Promise.all(responses.map((r) => r.json()));
+
+      const ids = new Set(bodies.map((b: any) => b.data.id));
+      expect(ids.size).toBe(1);
+
+      const activeConvs = await db
+        .select()
+        .from(schema.conversations)
+        .where(sql`scene_id = 'room-living-room' AND status = 'active'`);
+      expect(activeConvs.length).toBe(1);
+    });
+  });
+
+  describe("WebSocket broadcast integration", () => {
+    let broadcastSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      broadcastSpy = vi.spyOn(broadcastModule, "broadcast");
+    });
+
+    afterEach(() => {
+      broadcastSpy.mockRestore();
+    });
+
+    it("broadcasts new_message for user message", async () => {
+      const createRes = await app.request("/conversations", {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ scene_id: "room-living-room" }),
+      });
+      const { data: conv } = await createRes.json();
+      broadcastSpy.mockClear();
+
+      await app.request(`/conversations/${conv.id}/messages`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "hello everyone" }),
+      });
+
+      const newMsgCalls = broadcastSpy.mock.calls.filter(
+        ([msg]) => msg.type === "new_message",
+      );
+      expect(newMsgCalls.length).toBeGreaterThanOrEqual(1);
+
+      const userBroadcast = newMsgCalls[0][0] as broadcastModule.BroadcastMessage;
+      expect(userBroadcast.type).toBe("new_message");
+      expect((userBroadcast.data as any).content).toBe("hello everyone");
+      expect((userBroadcast.data as any).sender.type).toBe("user");
+    });
+
+    it("agent failure broadcasts agent_done to clear typing state", async () => {
+      // Seed agent profiles so TurnEvaluator returns eligible agents
+      await db.run(sql`DELETE FROM agent_profiles`);
+      await db.insert(schema.agentProfiles).values([
+        {
+          agent_id: "xiaoke",
+          display_name: "小克",
+          provider_id: "anthropic",
+          model_id: "claude-opus-4-6",
+          memory_scope: "xiaoke",
+        },
+      ]);
+      await db.run(sql`DELETE FROM agent_runtime_configs`);
+      await db.insert(schema.agentRuntimeConfigs).values([
+        {
+          agent_id: "xiaoke",
+          random_reply_affinity: 0.7,
+          max_response_tokens: 1024,
+          temperature: 0.8,
+          system_prompt_template: "test",
+        },
+      ]);
+
+      const createRes = await app.request("/conversations", {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ scene_id: "room-living-room" }),
+      });
+      const { data: conv } = await createRes.json();
+      broadcastSpy.mockClear();
+
+      // No API keys configured → gateway will fail → agent fails
+      await app.request(`/conversations/${conv.id}/messages`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "hello" }),
+      });
+
+      // Wait for async trigger to complete
+      await new Promise((r) => setTimeout(r, 200));
+
+      const typingCalls = broadcastSpy.mock.calls.filter(
+        ([msg]) => msg.type === "agent_typing",
+      );
+      const doneCalls = broadcastSpy.mock.calls.filter(
+        ([msg]) => msg.type === "agent_done",
+      );
+
+      // Every agent that started typing must have a corresponding agent_done
+      for (const [typingMsg] of typingCalls) {
+        const agentId = (typingMsg.data as any).agent_id;
+        const hasDone = doneCalls.some(
+          ([doneMsg]) => (doneMsg.data as any).agent_id === agentId,
+        );
+        expect(hasDone).toBe(true);
+      }
     });
   });
 });

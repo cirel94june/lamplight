@@ -172,7 +172,12 @@ export class TurnEvaluator {
     const rows = await this.deps.db
       .select({ ai_id: schema.aiPresence.ai_id })
       .from(schema.aiPresence)
-      .where(eq(schema.aiPresence.scene_id, sceneId));
+      .where(
+        and(
+          eq(schema.aiPresence.scene_id, sceneId),
+          eq(schema.aiPresence.state, "active"),
+        ),
+      );
     return rows.map((r) => r.ai_id);
   }
 

@@ -9,6 +9,7 @@ import { ContextBuilder } from "../services/runtime/context-builder.js";
 import { AgentRuntime } from "../services/runtime/agent-runtime.js";
 import { MockMemoryAdapter } from "../services/runtime/mock-memory-adapter.js";
 import { createGateway } from "../services/gateway/index.js";
+import { LamplightWebAdapter } from "../adapters/lamplight-web.js";
 
 const conversations = new Hono();
 
@@ -22,6 +23,7 @@ const runtime = new AgentRuntime({
   contextBuilder,
   conversationRepo,
 });
+const webAdapter = new LamplightWebAdapter();
 
 function encodeCursor(time: string, id: string): string {
   return Buffer.from(JSON.stringify({ t: time, i: id })).toString("base64url");
@@ -120,7 +122,12 @@ conversations.post("/", async (c) => {
   const presenceRows = await db
     .select({ ai_id: schema.aiPresence.ai_id })
     .from(schema.aiPresence)
-    .where(eq(schema.aiPresence.scene_id, scene_id));
+    .where(
+      and(
+        eq(schema.aiPresence.scene_id, scene_id),
+        eq(schema.aiPresence.state, "active"),
+      ),
+    );
 
   const participantAiIds = presenceRows.map((r) => r.ai_id);
   const now = new Date().toISOString();
@@ -263,17 +270,22 @@ conversations.post("/:id/messages", async (c) => {
     );
   }
 
+  const internal = webAdapter.toInternal(
+    { content: content.trim(), mentioned_agent_ids },
+    conv.kind as import("@lamplight/contracts").ConversationKind,
+  );
+
   const messageId = `msg_${randomUUID()}`;
   const now = new Date().toISOString();
 
   await conversationRepo.createMessage({
     id: messageId,
     conversation_id: convId,
-    conversation_kind: conv.kind,
-    sender_type: "user",
-    content: content.trim(),
-    context_type: "out_of_world",
-    context_set_by: "server",
+    conversation_kind: internal.conversation_kind,
+    sender_type: internal.sender_type,
+    content: internal.content,
+    context_type: internal.context.context_type,
+    context_set_by: internal.context.set_by,
     created_at: now,
   });
 
@@ -296,33 +308,28 @@ conversations.post("/:id/messages", async (c) => {
   return c.json({ ok: true, data: messageToResponse(userMsg) }, 201);
 });
 
-async function triggerAgentResponses(
+async function executeEvaluation(
+  evaluation: { eligible_agent_ids: string[]; conversation_id: string },
   conversationId: string,
-  messageId: string,
   sceneId: string | undefined,
   conversationKind: string,
-  mentionedAgentIds?: string[],
 ) {
-  const evaluation = await turnEvaluator.evaluateUserMessage({
-    conversation_id: conversationId,
-    message_id: messageId,
-    scene_id: sceneId,
-    mentioned_agent_ids: mentionedAgentIds,
-  });
+  if (evaluation.eligible_agent_ids.length === 0) return [];
 
-  if (evaluation.eligible_agent_ids.length === 0) return;
-
-  for (const agentId of evaluation.eligible_agent_ids) {
+  const typingAgents = new Set(evaluation.eligible_agent_ids);
+  for (const agentId of typingAgents) {
     broadcast({
       type: "agent_typing",
       data: { conversation_id: conversationId, agent_id: agentId },
     });
   }
 
-  const responses = await runtime.processEvaluation(evaluation, {
-    scene_id: sceneId,
-    conversation_kind: conversationKind,
-  });
+  const responses = await runtime.processEvaluation(
+    evaluation as import("@lamplight/contracts").TurnEvaluation,
+    { scene_id: sceneId, conversation_kind: conversationKind },
+  );
+
+  const respondedAgentIds = new Set(responses.map((r) => r.agent_id));
 
   for (const response of responses) {
     const msgRow = (await db
@@ -348,7 +355,41 @@ async function triggerAgentResponses(
     });
   }
 
-  // Chain: evaluate agent messages for follow-up responses
+  // Broadcast agent_done for agents that failed (were typing but didn't respond)
+  for (const agentId of typingAgents) {
+    if (!respondedAgentIds.has(agentId)) {
+      broadcast({
+        type: "agent_done",
+        data: {
+          conversation_id: conversationId,
+          agent_id: agentId,
+          message_id: "",
+        },
+      });
+    }
+  }
+
+  return responses;
+}
+
+async function triggerAgentResponses(
+  conversationId: string,
+  messageId: string,
+  sceneId: string | undefined,
+  conversationKind: string,
+  mentionedAgentIds?: string[],
+) {
+  const evaluation = await turnEvaluator.evaluateUserMessage({
+    conversation_id: conversationId,
+    message_id: messageId,
+    scene_id: sceneId,
+    mentioned_agent_ids: mentionedAgentIds,
+  });
+
+  const responses = await executeEvaluation(
+    evaluation, conversationId, sceneId, conversationKind,
+  );
+
   for (const response of responses) {
     const chainEval = await turnEvaluator.evaluateAgentMessage({
       conversation_id: conversationId,
@@ -357,43 +398,9 @@ async function triggerAgentResponses(
       scene_id: sceneId,
     });
 
-    if (chainEval.eligible_agent_ids.length === 0) continue;
-
-    for (const agentId of chainEval.eligible_agent_ids) {
-      broadcast({
-        type: "agent_typing",
-        data: { conversation_id: conversationId, agent_id: agentId },
-      });
-    }
-
-    const chainResponses = await runtime.processEvaluation(chainEval, {
-      scene_id: sceneId,
-      conversation_kind: conversationKind,
-    });
-
-    for (const chainResponse of chainResponses) {
-      const msgRow = (await db
-        .select()
-        .from(schema.messages)
-        .where(eq(schema.messages.id, chainResponse.message_id))
-        .limit(1))[0];
-
-      if (msgRow) {
-        broadcast({
-          type: "new_message",
-          data: messageToResponse(msgRow),
-        });
-      }
-
-      broadcast({
-        type: "agent_done",
-        data: {
-          conversation_id: conversationId,
-          agent_id: chainResponse.agent_id,
-          message_id: chainResponse.message_id,
-        },
-      });
-    }
+    await executeEvaluation(
+      chainEval, conversationId, sceneId, conversationKind,
+    );
   }
 }
 

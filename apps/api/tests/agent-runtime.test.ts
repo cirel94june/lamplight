@@ -179,9 +179,9 @@ describe("Agent Runtime integration", () => {
     beforeEach(async () => {
       // Place xiaoke, lucien, jasper in living room
       await db.insert(schema.aiPresence).values([
-        { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
-        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
-        { ai_id: "jasper", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "jasper", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
       ]);
 
       // Create conversation with all three as participants
@@ -297,7 +297,7 @@ describe("Agent Runtime integration", () => {
   describe("场景 2：卧室单聊 — 只有一个 AI 在卧室", () => {
     beforeEach(async () => {
       await db.insert(schema.aiPresence).values([
-        { ai_id: "xiaoke", scene_id: "room-ceci-bedroom", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "xiaoke", scene_id: "room-ceci-bedroom", state: "active", updated_at: new Date().toISOString() },
       ]);
 
       await conversationRepo.createConversation({
@@ -381,9 +381,9 @@ describe("Agent Runtime integration", () => {
   describe("场景 3：mention 触发 — mentioned_only 策略", () => {
     beforeEach(async () => {
       await db.insert(schema.aiPresence).values([
-        { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
-        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
-        { ai_id: "jasper", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "jasper", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
       ]);
 
       // Conversation with mentioned_only policy
@@ -481,8 +481,8 @@ describe("Agent Runtime integration", () => {
   describe("TurnEvaluator — on_agent_message", () => {
     beforeEach(async () => {
       await db.insert(schema.aiPresence).values([
-        { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
-        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
       ]);
 
       await conversationRepo.createConversation({
@@ -559,7 +559,7 @@ describe("Agent Runtime integration", () => {
       });
 
       await db.insert(schema.aiPresence).values([
-        { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
       ]);
 
       const evaluation = await turnEvaluator.evaluateUserMessage({
@@ -591,8 +591,8 @@ describe("Agent Runtime integration", () => {
   describe("阻塞项修复：affinity 作为概率权重", () => {
     beforeEach(async () => {
       await db.insert(schema.aiPresence).values([
-        { ai_id: "therapist", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
-        { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "therapist", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
       ]);
 
       await conversationRepo.createConversation({
@@ -635,7 +635,7 @@ describe("Agent Runtime integration", () => {
     it("affinity=0.7 agent rejected when roll >= 0.7", async () => {
       // Put lucien (affinity=0.5) and jasper (affinity=0.6) in scene
       await db.insert(schema.aiPresence).values([
-        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
       ]);
       await db.run(sql`UPDATE conversations SET participant_ai_ids = '["therapist","xiaoke","lucien"]' WHERE id = 'conv-affinity'`);
 
@@ -653,7 +653,7 @@ describe("Agent Runtime integration", () => {
 
     it("affinity=0.5 agent selected when roll < 0.5", async () => {
       await db.insert(schema.aiPresence).values([
-        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
       ]);
       await db.run(sql`UPDATE conversations SET participant_ai_ids = '["therapist","xiaoke","lucien"]' WHERE id = 'conv-affinity'`);
 
@@ -673,8 +673,8 @@ describe("Agent Runtime integration", () => {
   describe("阻塞项修复：cooldown/max_consecutive 查最近历史", () => {
     beforeEach(async () => {
       await db.insert(schema.aiPresence).values([
-        { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
-        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
       ]);
 
       await conversationRepo.createConversation({
@@ -839,8 +839,8 @@ describe("Agent Runtime integration", () => {
   describe("阻塞项修复：同时间戳 id DESC 次级排序", () => {
     beforeEach(async () => {
       await db.insert(schema.aiPresence).values([
-        { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
-        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
       ]);
 
       await conversationRepo.createConversation({
@@ -914,8 +914,8 @@ describe("Agent Runtime integration", () => {
   describe("阻塞项修复：单 agent 失败不拖垮整批", () => {
     it("one agent gateway failure does not block other agents", async () => {
       await db.insert(schema.aiPresence).values([
-        { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
-        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
       ]);
 
       await conversationRepo.createConversation({
@@ -982,9 +982,9 @@ describe("Agent Runtime integration", () => {
   describe("阻塞项修复：message ID 使用 UUID 避免冲突", () => {
     it("parallel agent responses produce unique message IDs", async () => {
       await db.insert(schema.aiPresence).values([
-        { ai_id: "xiaoke", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
-        { ai_id: "lucien", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
-        { ai_id: "jasper", scene_id: "room-living-room", state: "idle", updated_at: new Date().toISOString() },
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "jasper", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
       ]);
 
       await conversationRepo.createConversation({

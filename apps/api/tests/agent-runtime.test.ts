@@ -848,6 +848,18 @@ describe("Agent Runtime integration", () => {
         kind: "house_chat",
         scene_id: "room-living-room",
         participant_ai_ids: ["xiaoke", "lucien"],
+        turn_policy: {
+          policy_id: "tiebreak-test",
+          triggers: {
+            on_user_message: "all_present",
+            on_agent_message: {
+              mention: false,
+              random: true,
+              cooldown_ms: 0,
+              max_consecutive: 1,
+            },
+          },
+        },
         status: "active",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -881,8 +893,9 @@ describe("Agent Runtime integration", () => {
         created_at: sameTime,
       });
 
-      // With id DESC tiebreaker: msg-b-user comes first → consecutive AI count = 0
-      // Without tiebreaker: order is nondeterministic, could wrongly count 1
+      // max_consecutive=1: without id DESC tiebreaker, nondeterministic order
+      // could place msg-a-ai first → consecutive=1 → 1 >= 1 → blocked.
+      // With id DESC: msg-b-user (larger id) comes first → consecutive=0 → passes.
       const spy = vi.spyOn(Math, "random").mockReturnValue(0.1);
       const evaluation = await turnEvaluator.evaluateAgentMessage({
         conversation_id: "conv-tiebreak",
@@ -891,7 +904,7 @@ describe("Agent Runtime integration", () => {
         scene_id: "room-living-room",
       });
 
-      // consecutive=0 < max_consecutive=2, random path should run
+      // consecutive=0 < max_consecutive=1, random path runs
       // lucien (affinity=0.5, roll=0.1) should be eligible
       expect(evaluation.eligible_agent_ids).toContain("lucien");
       spy.mockRestore();

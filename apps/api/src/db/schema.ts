@@ -39,3 +39,58 @@ export const aiPresence = sqliteTable("ai_presence", {
   state: text("state").notNull().default("idle"),
   updated_at: text("updated_at").notNull(),
 });
+
+export const agentProfiles = sqliteTable("agent_profiles", {
+  agent_id: text("agent_id").primaryKey(),
+  display_name: text("display_name").notNull(),
+  provider_id: text("provider_id").notNull(),
+  model_id: text("model_id").notNull(),
+  memory_scope: text("memory_scope").notNull(),
+  tool_policy_id: text("tool_policy_id"),
+  prompt_version: text("prompt_version"),
+  created_at: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+export const agentRuntimeConfigs = sqliteTable("agent_runtime_configs", {
+  agent_id: text("agent_id").primaryKey(),
+  random_reply_affinity: real("random_reply_affinity").notNull(),
+  max_response_tokens: integer("max_response_tokens"),
+  temperature: real("temperature"),
+  system_prompt_template: text("system_prompt_template"),
+});
+
+export const conversations = sqliteTable("conversations", {
+  id: text("id").primaryKey(),
+  kind: text("kind").notNull(),
+  scene_id: text("scene_id"),
+  world_id: text("world_id"),
+  session_id: text("session_id"),
+  participant_ai_ids: text("participant_ai_ids", { mode: "json" })
+    .$type<string[]>()
+    .notNull(),
+  turn_policy: text("turn_policy", { mode: "json" })
+    .$type<Record<string, unknown> | null>(),
+  status: text("status").notNull().default("active"),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+
+export const messages = sqliteTable("messages", {
+  id: text("id").primaryKey(),
+  conversation_id: text("conversation_id").notNull(),
+  conversation_kind: text("conversation_kind").notNull(),
+  sender_type: text("sender_type").notNull(),
+  sender_ai_id: text("sender_ai_id"),
+  content: text("content").notNull(),
+  context_type: text("context_type").notNull(),
+  context_world_id: text("context_world_id"),
+  context_session_id: text("context_session_id"),
+  context_branch_id: text("context_branch_id"),
+  context_set_by: text("context_set_by").notNull().default("server"),
+  speech_mode: text("speech_mode"),
+  prompt_snapshot: text("prompt_snapshot", { mode: "json" })
+    .$type<{ model: string; rendered_prompt: string; created_at: string } | null>(),
+  created_at: text("created_at").notNull(),
+});

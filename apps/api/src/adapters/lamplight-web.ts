@@ -26,6 +26,9 @@ export class LamplightWebAdapter {
       ) {
         throw new TypeError("mentioned_agent_ids must be a string array");
       }
+      if (payload.mentioned_agent_ids.some((v) => v.trim().length === 0)) {
+        throw new TypeError("mentioned_agent_ids must not contain empty strings");
+      }
       mentionedAgentIds = payload.mentioned_agent_ids;
     }
 

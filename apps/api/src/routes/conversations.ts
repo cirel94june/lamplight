@@ -151,16 +151,30 @@ conversations.post("/", async (c) => {
   const now = new Date().toISOString();
   const id = `conv_${randomUUID()}`;
 
-  await conversationRepo.createConversation({
-    id,
-    kind: "house_chat",
-    scene_id,
-    participant_ai_ids: participantAiIds,
-    turn_policy: scene.default_turn_policy as Record<string, unknown> | null,
-    status: "active",
-    created_at: now,
-    updated_at: now,
-  });
+  try {
+    await conversationRepo.createConversation({
+      id,
+      kind: "house_chat",
+      scene_id,
+      participant_ai_ids: participantAiIds,
+      turn_policy: scene.default_turn_policy as Record<string, unknown> | null,
+      status: "active",
+      created_at: now,
+      updated_at: now,
+    });
+  } catch (err: any) {
+    const isUniqueViolation =
+      (err instanceof Error && err.message.includes("UNIQUE constraint failed")) ||
+      err?.cause?.code === "SQLITE_CONSTRAINT_UNIQUE" ||
+      err?.code === "SQLITE_CONSTRAINT_UNIQUE";
+    if (isUniqueViolation) {
+      return c.json(
+        { ok: false, error: { code: "CONFLICT", message: "scene already has an active conversation" } },
+        409,
+      );
+    }
+    throw err;
+  }
 
   const conv = await conversationRepo.getConversation(id);
   return c.json({ ok: true, data: conversationToResponse(conv!) }, 201);

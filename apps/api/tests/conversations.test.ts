@@ -98,6 +98,26 @@ describe("Conversation API", () => {
       expect(body.error.code).toBe("CONFLICT");
     });
 
+    it("concurrent POST /conversations returns 409 not 500", async () => {
+      const requests = Array.from({ length: 12 }, () =>
+        app.request("/conversations", {
+          method: "POST",
+          headers: { ...authHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({ scene_id: "room-living-room" }),
+        }),
+      );
+
+      const responses = await Promise.all(requests);
+      const statuses = responses.map((r) => r.status);
+      const created = statuses.filter((s) => s === 201);
+      const conflicts = statuses.filter((s) => s === 409);
+      const serverErrors = statuses.filter((s) => s >= 500);
+
+      expect(created.length).toBe(1);
+      expect(conflicts.length).toBe(11);
+      expect(serverErrors.length).toBe(0);
+    });
+
     it("returns 400 without scene_id", async () => {
       const res = await app.request("/conversations", {
         method: "POST",
@@ -209,6 +229,43 @@ describe("Conversation API", () => {
       const body = await res.json();
       expect(body.error.code).toBe("VALIDATION_ERROR");
       expect(body.error.message).toContain("string array");
+    });
+
+    it("rejects empty-string mentioned_agent_ids", async () => {
+      const createRes = await app.request("/conversations", {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ scene_id: "room-living-room" }),
+      });
+      const { data: conv } = await createRes.json();
+
+      const res = await app.request(`/conversations/${conv.id}/messages`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "hello", mentioned_agent_ids: [""] }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("VALIDATION_ERROR");
+      expect(body.error.message).toContain("empty");
+    });
+
+    it("rejects whitespace-only mentioned_agent_ids", async () => {
+      const createRes = await app.request("/conversations", {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ scene_id: "room-living-room" }),
+      });
+      const { data: conv } = await createRes.json();
+
+      const res = await app.request(`/conversations/${conv.id}/messages`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "hello", mentioned_agent_ids: ["  "] }),
+      });
+
+      expect(res.status).toBe(400);
     });
 
     it("rejects messages to archived conversation", async () => {

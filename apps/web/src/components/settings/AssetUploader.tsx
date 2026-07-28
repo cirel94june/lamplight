@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 
-const ACCEPT = ".png,.jpg,.jpeg,.webp,.svg";
+const ACCEPT = ".png,.jpg,.jpeg,.webp";
 
 interface Props {
   label: string;

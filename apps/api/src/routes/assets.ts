@@ -1,32 +1,38 @@
 import { Hono } from "hono";
-import { writeFile, unlink, readdir } from "node:fs/promises";
+import { writeFile, unlink, readdir, readFile, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 
 const ALLOWED_TYPES = new Set(["avatars", "rooms"] as const);
 
-const MAGIC_BYTES: Array<{ mime: string; ext: string; sig: number[] }> = [
-  { mime: "image/png", ext: ".png", sig: [0x89, 0x50, 0x4E, 0x47] },
-  { mime: "image/jpeg", ext: ".jpg", sig: [0xFF, 0xD8, 0xFF] },
-  { mime: "image/webp", ext: ".webp", sig: [0x52, 0x49, 0x46, 0x46] },
+const MIN_VALID_SIZE: Record<string, number> = {
+  ".png": 67,
+  ".jpg": 107,
+  ".webp": 30,
+};
+
+const MAGIC_BYTES: Array<{ ext: string; sig: number[]; minLen: number }> = [
+  { ext: ".png", sig: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], minLen: 67 },
+  { ext: ".jpg", sig: [0xFF, 0xD8, 0xFF], minLen: 107 },
+  { ext: ".webp", sig: [0x52, 0x49, 0x46, 0x46], minLen: 30 },
 ];
 
 const MAX_SIZE_AVATAR = 500 * 1024;
 const MAX_SIZE_ROOM = 2 * 1024 * 1024;
 
-const ASSETS_DIR = resolve(
-  import.meta.dirname ?? ".",
-  "../../../web/public/assets",
-);
+export function getAssetsDir(): string {
+  if (process.env.ASSETS_DIR) return resolve(process.env.ASSETS_DIR);
+  return resolve(import.meta.dirname ?? ".", "../../../web/public/assets");
+}
 
 function detectFormat(buf: Buffer): { ext: string } | null {
-  for (const { ext, sig } of MAGIC_BYTES) {
-    if (sig.every((b, i) => buf[i] === b)) {
-      if (ext === ".webp" && buf.length >= 12) {
-        if (buf[8] !== 0x57 || buf[9] !== 0x45 || buf[10] !== 0x42 || buf[11] !== 0x50) return null;
-      }
-      return { ext };
+  for (const { ext, sig, minLen } of MAGIC_BYTES) {
+    if (buf.length < minLen) continue;
+    if (!sig.every((b, i) => buf[i] === b)) continue;
+    if (ext === ".webp") {
+      if (buf[8] !== 0x57 || buf[9] !== 0x45 || buf[10] !== 0x42 || buf[11] !== 0x50) continue;
     }
+    return { ext };
   }
   return null;
 }
@@ -40,7 +46,7 @@ assets.get("/:type", async (c) => {
     return c.json({ ok: false, error: { code: "VALIDATION_ERROR", message: "invalid asset type" } }, 400);
   }
 
-  const dir = join(ASSETS_DIR, type);
+  const dir = join(getAssetsDir(), type);
   if (!existsSync(dir)) {
     return c.json({ ok: true, data: {} });
   }
@@ -52,6 +58,38 @@ assets.get("/:type", async (c) => {
     manifest[id] = `/assets/${type}/${f}`;
   }
   return c.json({ ok: true, data: manifest });
+});
+
+assets.get("/:type/:filename{.+\\..+}", async (c) => {
+  const type = c.req.param("type");
+  const filename = c.req.param("filename");
+
+  if (!ALLOWED_TYPES.has(type as any)) {
+    return c.notFound();
+  }
+
+  const filePath = join(getAssetsDir(), type, filename);
+  if (!existsSync(filePath)) {
+    return c.notFound();
+  }
+
+  const data = await readFile(filePath);
+  const ext = filename.split(".").pop()?.toLowerCase();
+  const mimeMap: Record<string, string> = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+  };
+  const contentType = mimeMap[ext ?? ""] ?? "application/octet-stream";
+
+  return new Response(data, {
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": "public, max-age=3600",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
 });
 
 assets.post("/:type/:id", async (c) => {
@@ -81,13 +119,11 @@ assets.post("/:type/:id", async (c) => {
   const buffer = Buffer.from(await file.arrayBuffer());
   const detected = detectFormat(buffer);
   if (!detected) {
-    return c.json({ ok: false, error: { code: "VALIDATION_ERROR", message: "unsupported format: only PNG, JPEG, WebP allowed" } }, 400);
+    return c.json({ ok: false, error: { code: "VALIDATION_ERROR", message: "unsupported or truncated image: only valid PNG, JPEG, WebP allowed" } }, 400);
   }
 
-  const dir = join(ASSETS_DIR, type);
-  if (!existsSync(dir)) {
-    return c.json({ ok: false, error: { code: "SERVER_ERROR", message: "asset directory not found" } }, 500);
-  }
+  const dir = join(getAssetsDir(), type);
+  await mkdir(dir, { recursive: true });
 
   const existing = (await readdir(dir)).filter((f) => f.startsWith(id + "."));
   for (const old of existing) {
@@ -109,7 +145,7 @@ assets.delete("/:type/:id", async (c) => {
     return c.json({ ok: false, error: { code: "VALIDATION_ERROR", message: "invalid asset type" } }, 400);
   }
 
-  const dir = join(ASSETS_DIR, type);
+  const dir = join(getAssetsDir(), type);
   if (!existsSync(dir)) {
     return c.json({ ok: false, error: { code: "NOT_FOUND", message: "asset not found" } }, 404);
   }

@@ -1,37 +1,55 @@
 import { describe, expect, it, beforeAll, afterAll, beforeEach } from "vitest";
 import { app } from "../src/app.js";
 import { mkdirSync, rmSync, readdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { tmpdir } from "node:os";
+import { mkdtempSync } from "node:fs";
 
 const TOKEN = "test-token-123";
-const ASSETS_DIR = resolve(import.meta.dirname, "../../web/public/assets");
-const AVATARS_DIR = resolve(ASSETS_DIR, "avatars");
-const ROOMS_DIR = resolve(ASSETS_DIR, "rooms");
+
+let TEST_DIR: string;
+let AVATARS_DIR: string;
+let ROOMS_DIR: string;
 
 function authHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${TOKEN}` };
 }
 
-function makePng(width = 1, height = 1): Uint8Array {
+function makePng(): Uint8Array {
   const sig = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-  const rest = new Array(64).fill(0);
-  return new Uint8Array([...sig, ...rest]);
+  const ihdr = [
+    0x00, 0x00, 0x00, 0x0D, // chunk length: 13
+    0x49, 0x48, 0x44, 0x52, // "IHDR"
+    0x00, 0x00, 0x00, 0x01, // width: 1
+    0x00, 0x00, 0x00, 0x01, // height: 1
+    0x08, 0x02,             // bit depth 8, color type 2 (RGB)
+    0x00, 0x00, 0x00,       // compression, filter, interlace
+  ];
+  const padding = new Array(42).fill(0);
+  return new Uint8Array([...sig, ...ihdr, ...padding]);
 }
 
 function makeJpeg(): Uint8Array {
-  return new Uint8Array([0xFF, 0xD8, 0xFF, 0xE0, ...new Array(60).fill(0)]);
+  const header = [0xFF, 0xD8, 0xFF, 0xE0];
+  const padding = new Array(103).fill(0);
+  return new Uint8Array([...header, ...padding]);
 }
 
 function makeWebp(): Uint8Array {
   const riff = [0x52, 0x49, 0x46, 0x46];
   const size = [0x00, 0x00, 0x00, 0x00];
   const webp = [0x57, 0x45, 0x42, 0x50];
-  return new Uint8Array([...riff, ...size, ...webp, ...new Array(52).fill(0)]);
+  const padding = new Array(18).fill(0);
+  return new Uint8Array([...riff, ...size, ...webp, ...padding]);
 }
 
 function makeSvg(): Uint8Array {
   const xml = '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><rect/></svg>';
   return new TextEncoder().encode(xml);
+}
+
+function makeTruncatedPng(): Uint8Array {
+  return new Uint8Array([0x89, 0x50, 0x4E, 0x47]);
 }
 
 function makeFormData(filename: string, data: Uint8Array, mime: string): FormData {
@@ -44,15 +62,19 @@ function cleanDir(dir: string) {
   try {
     const files = readdirSync(dir);
     for (const f of files) {
-      if (f !== ".gitkeep") {
-        rmSync(resolve(dir, f), { force: true });
-      }
+      rmSync(resolve(dir, f), { force: true });
     }
   } catch { /* dir may not exist */ }
 }
 
 beforeAll(() => {
+  TEST_DIR = mkdtempSync(join(tmpdir(), "lamplight-assets-test-"));
+  AVATARS_DIR = join(TEST_DIR, "avatars");
+  ROOMS_DIR = join(TEST_DIR, "rooms");
+
   process.env.OWNER_TOKEN = TOKEN;
+  process.env.ASSETS_DIR = TEST_DIR;
+
   mkdirSync(AVATARS_DIR, { recursive: true });
   mkdirSync(ROOMS_DIR, { recursive: true });
 });
@@ -63,8 +85,8 @@ beforeEach(() => {
 });
 
 afterAll(() => {
-  cleanDir(AVATARS_DIR);
-  cleanDir(ROOMS_DIR);
+  rmSync(TEST_DIR, { recursive: true, force: true });
+  delete process.env.ASSETS_DIR;
 });
 
 describe("Assets API", () => {
@@ -108,7 +130,7 @@ describe("Assets API", () => {
       expect(body.ok).toBe(true);
       expect(body.data.url).toBe("/assets/avatars/xiaoke.png");
 
-      const files = readdirSync(AVATARS_DIR).filter((f) => f !== ".gitkeep");
+      const files = readdirSync(AVATARS_DIR);
       expect(files).toContain("xiaoke.png");
     });
 
@@ -143,9 +165,9 @@ describe("Assets API", () => {
       expect(res.status).toBe(400);
       const body = await res.json();
       expect(body.ok).toBe(false);
-      expect(body.error.message).toContain("unsupported format");
+      expect(body.error.message).toContain("unsupported");
 
-      const files = readdirSync(AVATARS_DIR).filter((f) => f !== ".gitkeep");
+      const files = readdirSync(AVATARS_DIR);
       expect(files).not.toContain("xiaoke.svg");
     });
 
@@ -156,6 +178,17 @@ describe("Assets API", () => {
         body: makeFormData("avatar.png", makeSvg(), "image/png"),
       });
       expect(res.status).toBe(400);
+    });
+
+    it("rejects truncated PNG (only 4 bytes)", async () => {
+      const res = await app.request("/assets/avatars/xiaoke", {
+        method: "POST",
+        headers: authHeaders(),
+        body: makeFormData("avatar.png", makeTruncatedPng(), "image/png"),
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.message).toContain("truncated");
     });
 
     it("rejects file with wrong magic bytes despite correct MIME", async () => {
@@ -193,7 +226,7 @@ describe("Assets API", () => {
         body: makeFormData("avatar.jpg", makeJpeg(), "image/jpeg"),
       });
 
-      const files = readdirSync(AVATARS_DIR).filter((f) => f !== ".gitkeep");
+      const files = readdirSync(AVATARS_DIR);
       expect(files).toContain("xiaoke.jpg");
       expect(files).not.toContain("xiaoke.png");
     });
@@ -217,6 +250,26 @@ describe("Assets API", () => {
     });
   });
 
+  describe("GET /assets/:type/:filename (static serving)", () => {
+    it("serves uploaded file with correct content type", async () => {
+      await app.request("/assets/avatars/xiaoke", {
+        method: "POST",
+        headers: authHeaders(),
+        body: makeFormData("avatar.png", makePng(), "image/png"),
+      });
+
+      const res = await app.request("/assets/avatars/xiaoke.png", { headers: authHeaders() });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("image/png");
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    });
+
+    it("returns 404 for non-existent file", async () => {
+      const res = await app.request("/assets/avatars/nobody.png", { headers: authHeaders() });
+      expect(res.status).toBe(404);
+    });
+  });
+
   describe("DELETE /assets/:type/:id", () => {
     it("deletes existing asset", async () => {
       await app.request("/assets/avatars/xiaoke", {
@@ -233,7 +286,7 @@ describe("Assets API", () => {
       const body = await res.json();
       expect(body.ok).toBe(true);
 
-      const files = readdirSync(AVATARS_DIR).filter((f) => f !== ".gitkeep");
+      const files = readdirSync(AVATARS_DIR);
       expect(files).not.toContain("xiaoke.png");
     });
 

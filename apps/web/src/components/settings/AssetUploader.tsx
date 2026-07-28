@@ -1,6 +1,21 @@
 import { useCallback, useRef, useState } from "react";
 
 const ACCEPT = ".png,.jpg,.jpeg,.webp";
+const MAX_DIMENSION = 4096;
+const MIN_DIMENSION = 1;
+
+async function validateDimensions(file: File): Promise<{ width: number; height: number }> {
+  const bitmap = await createImageBitmap(file);
+  const { width, height } = bitmap;
+  bitmap.close();
+  if (width < MIN_DIMENSION || height < MIN_DIMENSION) {
+    throw new Error("图片尺寸无效");
+  }
+  if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+    throw new Error(`图片尺寸过大（最大 ${MAX_DIMENSION}×${MAX_DIMENSION}）`);
+  }
+  return { width, height };
+}
 
 interface Props {
   label: string;
@@ -21,6 +36,14 @@ export function AssetUploader({ label, currentUrl, onUpload, onDelete }: Props) 
       if (!file) return;
 
       setError(null);
+      try {
+        await validateDimensions(file);
+      } catch (err: any) {
+        setError(err.message ?? "图片无法解码");
+        if (inputRef.current) inputRef.current.value = "";
+        return;
+      }
+
       setPreview(URL.createObjectURL(file));
       setUploading(true);
       try {

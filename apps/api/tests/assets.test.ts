@@ -30,17 +30,40 @@ function makePng(): Uint8Array {
 }
 
 function makeJpeg(): Uint8Array {
-  const header = [0xFF, 0xD8, 0xFF, 0xE0];
-  const padding = new Array(103).fill(0);
-  return new Uint8Array([...header, ...padding]);
+  // SOI + APP0 segment (len=16) + SOF0 with 1×1 dimensions
+  const soi = [0xFF, 0xD8];
+  const app0Marker = [0xFF, 0xE0];
+  const app0Len = [0x00, 0x10]; // 16 bytes
+  const app0Body = new Array(14).fill(0);
+  // SOF0 marker with dimensions
+  const sof0Marker = [0xFF, 0xC0];
+  const sof0Len = [0x00, 0x0B]; // 11 bytes
+  const sof0Body = [
+    0x08,       // precision: 8 bits
+    0x00, 0x01, // height: 1
+    0x00, 0x01, // width: 1
+    0x01,       // num components: 1
+    0x01, 0x11, 0x00, // component 1
+  ];
+  return new Uint8Array([...soi, ...app0Marker, ...app0Len, ...app0Body,
+    ...sof0Marker, ...sof0Len, ...sof0Body]);
 }
 
 function makeWebp(): Uint8Array {
-  const riff = [0x52, 0x49, 0x46, 0x46];
-  const size = [0x00, 0x00, 0x00, 0x00];
-  const webp = [0x57, 0x45, 0x42, 0x50];
-  const padding = new Array(18).fill(0);
-  return new Uint8Array([...riff, ...size, ...webp, ...padding]);
+  // RIFF container with VP8 lossy chunk, 1×1 pixel
+  const riff = [0x52, 0x49, 0x46, 0x46]; // "RIFF"
+  const webp = [0x57, 0x45, 0x42, 0x50]; // "WEBP"
+  const vp8 = [0x56, 0x50, 0x38, 0x20];  // "VP8 "
+  const vp8ChunkSize = [0x0A, 0x00, 0x00, 0x00]; // 10 bytes
+  const vp8Frame = [
+    0x30, 0x01, 0x00, // frame tag (keyframe)
+    0x9D, 0x01, 0x2A, // VP8 signature
+    0x01, 0x00,       // width: 1
+    0x01, 0x00,       // height: 1
+  ];
+  const totalPayload = webp.length + vp8.length + vp8ChunkSize.length + vp8Frame.length;
+  const fileSize = [totalPayload & 0xFF, (totalPayload >> 8) & 0xFF, 0x00, 0x00];
+  return new Uint8Array([...riff, ...fileSize, ...webp, ...vp8, ...vp8ChunkSize, ...vp8Frame]);
 }
 
 function makeSvg(): Uint8Array {
@@ -50,6 +73,56 @@ function makeSvg(): Uint8Array {
 
 function makeTruncatedPng(): Uint8Array {
   return new Uint8Array([0x89, 0x50, 0x4E, 0x47]);
+}
+
+function makeCorruptPng(): Uint8Array {
+  // Valid PNG signature + valid IHDR length/type but width=0 (invalid)
+  const sig = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+  const ihdr = [
+    0x00, 0x00, 0x00, 0x0D,
+    0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x00, // width: 0 (invalid)
+    0x00, 0x00, 0x00, 0x01, // height: 1
+    0x08, 0x02,
+    0x00, 0x00, 0x00,
+  ];
+  const padding = new Array(42).fill(0);
+  return new Uint8Array([...sig, ...ihdr, ...padding]);
+}
+
+function makeCorruptJpeg(): Uint8Array {
+  // Valid JPEG SOI + APP0 + SOF0 with height=0 (invalid)
+  const soi = [0xFF, 0xD8];
+  const app0Marker = [0xFF, 0xE0];
+  const app0Len = [0x00, 0x10];
+  const app0Body = new Array(14).fill(0);
+  const sof0Marker = [0xFF, 0xC0];
+  const sof0Len = [0x00, 0x0B];
+  const sof0Body = [
+    0x08,
+    0x00, 0x00, // height: 0 (invalid)
+    0x00, 0x01,
+    0x01, 0x01, 0x11, 0x00,
+  ];
+  return new Uint8Array([...soi, ...app0Marker, ...app0Len, ...app0Body,
+    ...sof0Marker, ...sof0Len, ...sof0Body]);
+}
+
+function makeCorruptWebp(): Uint8Array {
+  // Valid RIFF+WEBP+VP8 header but width=0 (invalid)
+  const riff = [0x52, 0x49, 0x46, 0x46];
+  const webp = [0x57, 0x45, 0x42, 0x50];
+  const vp8 = [0x56, 0x50, 0x38, 0x20];
+  const vp8ChunkSize = [0x0A, 0x00, 0x00, 0x00];
+  const vp8Frame = [
+    0x30, 0x01, 0x00,
+    0x9D, 0x01, 0x2A,
+    0x00, 0x00, // width: 0 (invalid)
+    0x01, 0x00,
+  ];
+  const totalPayload = webp.length + vp8.length + vp8ChunkSize.length + vp8Frame.length;
+  const fileSize = [totalPayload & 0xFF, (totalPayload >> 8) & 0xFF, 0x00, 0x00];
+  return new Uint8Array([...riff, ...fileSize, ...webp, ...vp8, ...vp8ChunkSize, ...vp8Frame]);
 }
 
 function makeFormData(filename: string, data: Uint8Array, mime: string): FormData {
@@ -188,7 +261,7 @@ describe("Assets API", () => {
       });
       expect(res.status).toBe(400);
       const body = await res.json();
-      expect(body.error.message).toContain("truncated");
+      expect(body.error.message).toContain("corrupt");
     });
 
     it("rejects file with wrong magic bytes despite correct MIME", async () => {
@@ -197,6 +270,35 @@ describe("Assets API", () => {
         method: "POST",
         headers: authHeaders(),
         body: makeFormData("avatar.png", garbage, "image/png"),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects PNG with valid signature but corrupt IHDR (width=0)", async () => {
+      const res = await app.request("/assets/avatars/xiaoke", {
+        method: "POST",
+        headers: authHeaders(),
+        body: makeFormData("avatar.png", makeCorruptPng(), "image/png"),
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.message).toContain("corrupt");
+    });
+
+    it("rejects JPEG with valid markers but corrupt SOF (height=0)", async () => {
+      const res = await app.request("/assets/avatars/xiaoke", {
+        method: "POST",
+        headers: authHeaders(),
+        body: makeFormData("avatar.jpg", makeCorruptJpeg(), "image/jpeg"),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects WebP with valid RIFF header but corrupt VP8 (width=0)", async () => {
+      const res = await app.request("/assets/rooms/room-1", {
+        method: "POST",
+        headers: authHeaders(),
+        body: makeFormData("room.webp", makeCorruptWebp(), "image/webp"),
       });
       expect(res.status).toBe(400);
     });

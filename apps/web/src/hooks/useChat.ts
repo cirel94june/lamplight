@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "../types/chat.js";
+import { mergeMessages } from "./merge.js";
 
 export function useChat(conversationId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -8,6 +9,7 @@ export function useChat(conversationId: string | null) {
   const [loading, setLoading] = useState(false);
   const nextCursorRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const loadMoreAbortRef = useRef<AbortController | null>(null);
   const convIdRef = useRef(conversationId);
   convIdRef.current = conversationId;
 
@@ -16,6 +18,7 @@ export function useChat(conversationId: string | null) {
     setTypingAgents(new Set());
     setHasMore(false);
     nextCursorRef.current = null;
+    loadMoreAbortRef.current?.abort();
 
     if (!conversationId) return;
 
@@ -31,7 +34,8 @@ export function useChat(conversationId: string | null) {
       .then((body) => {
         if (controller.signal.aborted) return;
         if (body.ok) {
-          setMessages(body.data.slice().reverse());
+          const fetched: ChatMessage[] = body.data.slice().reverse();
+          setMessages((prev) => mergeMessages(prev, fetched));
           nextCursorRef.current = body.next_cursor;
           setHasMore(!!body.next_cursor);
         }
@@ -50,19 +54,30 @@ export function useChat(conversationId: string | null) {
   const loadMore = useCallback(async () => {
     const id = convIdRef.current;
     const cursor = nextCursorRef.current;
-    if (!id || !cursor) return;
+    if (!id || !cursor || loading) return;
 
-    const res = await fetch(
-      `/api/conversations/${id}/messages?limit=50&cursor=${cursor}`,
-    );
-    const body = await res.json();
-    if (body.ok) {
-      const older: ChatMessage[] = body.data.slice().reverse();
-      setMessages((prev) => [...older, ...prev]);
-      nextCursorRef.current = body.next_cursor;
-      setHasMore(!!body.next_cursor);
+    loadMoreAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadMoreAbortRef.current = controller;
+
+    try {
+      const res = await fetch(
+        `/api/conversations/${id}/messages?limit=50&cursor=${cursor}`,
+        { signal: controller.signal },
+      );
+      const body = await res.json();
+      if (controller.signal.aborted || id !== convIdRef.current) return;
+      if (body.ok) {
+        const older: ChatMessage[] = body.data.slice().reverse();
+        setMessages((prev) => mergeMessages(older, prev));
+        nextCursorRef.current = body.next_cursor;
+        setHasMore(!!body.next_cursor);
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      console.error("[useChat] loadMore failed:", err);
     }
-  }, []);
+  }, [loading]);
 
   const sendMessage = useCallback(
     async (content: string, mentionedAgentIds?: string[]) => {
@@ -78,11 +93,9 @@ export function useChat(conversationId: string | null) {
         }),
       });
       const body = await res.json();
+      if (id !== convIdRef.current) return;
       if (body.ok) {
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === body.data.id)) return prev;
-          return [...prev, body.data];
-        });
+        setMessages((prev) => mergeMessages(prev, [body.data]));
       }
     },
     [],
@@ -92,10 +105,7 @@ export function useChat(conversationId: string | null) {
     (data: Record<string, unknown>) => {
       const msg = data as unknown as ChatMessage;
       if (msg.conversation_id !== convIdRef.current) return;
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.id)) return prev;
-        return [...prev, msg];
-      });
+      setMessages((prev) => mergeMessages(prev, [msg]));
       if (msg.sender.type === "ai" && msg.sender.ai_id) {
         setTypingAgents((prev) => {
           const next = new Set(prev);

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { mergeEvents, mergePresence } from "../../web/src/hooks/merge.js";
+import { mergeEvents, mergePresence, mergeMessages } from "../../web/src/hooks/merge.js";
 import type { HouseEventItem } from "../../web/src/hooks/useEvents.js";
+import type { ChatMessage } from "../../web/src/types/chat.js";
 
 function makeEvent(id: string, created_at: string): HouseEventItem {
   return {
@@ -161,5 +162,73 @@ describe("mergePresence", () => {
     const xiaoke = result.find((p) => p.ai_id === "xiaoke")!;
     expect(xiaoke.scene_id).toBe("room-study");
     expect(xiaoke.updated_at).toBe("2026-07-24T01:00:00.500Z");
+  });
+});
+
+function makeMessage(id: string, created_at: string, content = `msg ${id}`): ChatMessage {
+  return {
+    id,
+    conversation_id: "conv-1",
+    conversation_kind: "house_chat",
+    sender: { type: "user" },
+    content,
+    context: { context_type: "out_of_world", set_by: "server" },
+    created_at,
+  };
+}
+
+describe("mergeMessages", () => {
+  it("deduplicates by id", () => {
+    const m1 = makeMessage("m1", "2026-07-24T01:00:00Z");
+    const m1dup = makeMessage("m1", "2026-07-24T01:00:00Z");
+    const m2 = makeMessage("m2", "2026-07-24T01:01:00Z");
+
+    const result = mergeMessages([m1, m2], [m1dup]);
+    expect(result).toHaveLength(2);
+  });
+
+  it("sorts oldest first (chronological for chat)", () => {
+    const m1 = makeMessage("m1", "2026-07-24T01:00:00Z");
+    const m2 = makeMessage("m2", "2026-07-24T02:00:00Z");
+    const m3 = makeMessage("m3", "2026-07-24T01:30:00Z");
+
+    const result = mergeMessages([], [m2, m1, m3]);
+    expect(result.map((m) => m.id)).toEqual(["m1", "m3", "m2"]);
+  });
+
+  it("WS message arriving before REST snapshot is preserved", () => {
+    const wsMsg = makeMessage("m3", "2026-07-24T03:00:00Z");
+    const rest = [
+      makeMessage("m1", "2026-07-24T01:00:00Z"),
+      makeMessage("m2", "2026-07-24T02:00:00Z"),
+    ];
+
+    const result = mergeMessages([wsMsg], rest);
+    expect(result).toHaveLength(3);
+    expect(result.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
+  });
+
+  it("REST snapshot arriving after WS events merges without loss", () => {
+    const ws1 = makeMessage("m3", "2026-07-24T03:00:00Z");
+    const ws2 = makeMessage("m4", "2026-07-24T04:00:00Z");
+    const rest = [
+      makeMessage("m1", "2026-07-24T01:00:00Z"),
+      makeMessage("m2", "2026-07-24T02:00:00Z"),
+      makeMessage("m3", "2026-07-24T03:00:00Z"),
+    ];
+
+    const result = mergeMessages([ws2, ws1], rest);
+    expect(result).toHaveLength(4);
+    expect(result.map((m) => m.id)).toEqual(["m1", "m2", "m3", "m4"]);
+  });
+
+  it("POST response duplicate does not create double entry", () => {
+    const existing = [
+      makeMessage("m1", "2026-07-24T01:00:00Z"),
+    ];
+    const postResponse = makeMessage("m1", "2026-07-24T01:00:00Z", "same msg");
+
+    const result = mergeMessages(existing, [postResponse]);
+    expect(result).toHaveLength(1);
   });
 });

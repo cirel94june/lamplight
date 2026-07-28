@@ -8,13 +8,12 @@ export function useConversation(sceneId: string | null) {
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    if (!sceneId) {
-      setConversationId(null);
-      setConversation(null);
-      return;
-    }
-
     abortRef.current?.abort();
+    setConversationId(null);
+    setConversation(null);
+
+    if (!sceneId) return;
+
     const controller = new AbortController();
     abortRef.current = controller;
 

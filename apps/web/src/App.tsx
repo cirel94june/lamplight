@@ -24,7 +24,7 @@ export function App() {
 
   const { conversationId, loading: convLoading } = useConversation(selectedRoom);
   const chat = useChat(conversationId);
-  const { getAvatarUrl, uploadAsset, deleteAsset } = useAssets();
+  const { getAvatarUrl, getRoomImageUrl, uploadAsset, deleteAsset } = useAssets();
 
   const handleWsMessage = useCallback(
     (msg: WsMessage) => {
@@ -81,6 +81,8 @@ export function App() {
             presence={presence}
             selectedRoom={selectedRoom}
             onSelectRoom={setSelectedRoom}
+            getAvatarUrl={getAvatarUrl}
+            getRoomImageUrl={getRoomImageUrl}
           />
         </section>
         {selectedRoom ? (
@@ -107,7 +109,9 @@ export function App() {
       <SettingsPanel
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        scenes={scenes}
         getAvatarUrl={getAvatarUrl}
+        getRoomImageUrl={getRoomImageUrl}
         uploadAsset={uploadAsset}
         deleteAsset={deleteAsset}
       />

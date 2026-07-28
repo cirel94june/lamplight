@@ -1,7 +1,19 @@
 import type { Presence } from "@lamplight/contracts";
 import type { HouseEventItem } from "./useEvents.js";
+import type { ChatMessage } from "../types/chat.js";
 
 const MAX_EVENTS = 200;
+
+export function mergeMessages(
+  existing: ChatMessage[],
+  incoming: ChatMessage[],
+): ChatMessage[] {
+  const seen = new Map<string, ChatMessage>();
+  for (const m of existing) seen.set(m.id, m);
+  for (const m of incoming) seen.set(m.id, m);
+  return [...seen.values()]
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+}
 
 export function mergeEvents(
   existing: HouseEventItem[],

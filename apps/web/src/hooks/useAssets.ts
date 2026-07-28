@@ -1,22 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
-const EXTENSIONS = ["png", "jpg", "webp", "svg"];
-
-async function probeUrl(base: string, id: string): Promise<string | null> {
-  for (const ext of EXTENSIONS) {
-    const url = `/assets/${base}/${id}.${ext}`;
-    try {
-      const res = await fetch(url, { method: "HEAD" });
-      if (res.ok) return url;
-    } catch {
-      /* skip */
-    }
-  }
-  return null;
-}
-
 export function useAssets() {
   const [avatarUrls, setAvatarUrls] = useState<Record<string, string>>({});
+  const [roomUrls, setRoomUrls] = useState<Record<string, string>>({});
   const [version, setVersion] = useState(0);
 
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
@@ -26,18 +12,33 @@ export function useAssets() {
     [avatarUrls],
   );
 
+  const getRoomImageUrl = useCallback(
+    (sceneId: string): string | undefined => roomUrls[sceneId],
+    [roomUrls],
+  );
+
   useEffect(() => {
-    const agentIds = ["xiaoke", "lucien", "jasper", "therapist"];
     let cancelled = false;
-    Promise.all(agentIds.map((id) => probeUrl("avatars", id).then((url) => [id, url] as const)))
-      .then((results) => {
+
+    async function load() {
+      try {
+        const [avatarRes, roomRes] = await Promise.all([
+          fetch("/api/assets/avatars"),
+          fetch("/api/assets/rooms"),
+        ]);
+        const [avatarBody, roomBody] = await Promise.all([
+          avatarRes.json(),
+          roomRes.json(),
+        ]);
         if (cancelled) return;
-        const map: Record<string, string> = {};
-        for (const [id, url] of results) {
-          if (url) map[id] = url;
-        }
-        setAvatarUrls(map);
-      });
+        if (avatarBody.ok) setAvatarUrls(avatarBody.data);
+        if (roomBody.ok) setRoomUrls(roomBody.data);
+      } catch {
+        /* API not available */
+      }
+    }
+
+    load();
     return () => { cancelled = true; };
   }, [version]);
 
@@ -67,5 +68,5 @@ export function useAssets() {
     [refresh],
   );
 
-  return { getAvatarUrl, uploadAsset, deleteAsset, refresh };
+  return { getAvatarUrl, getRoomImageUrl, uploadAsset, deleteAsset, refresh };
 }

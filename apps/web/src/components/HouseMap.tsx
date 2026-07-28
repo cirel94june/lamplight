@@ -41,7 +41,7 @@ export function HouseMap({ scenes, presence, selectedRoom, onSelectRoom }: Props
     presence.filter((p) => p.scene_id === sceneId);
 
   return (
-    <svg viewBox="-10 -10 500 520" style={{ width: "100%", maxWidth: 520 }}>
+    <svg viewBox="-10 -10 500 520" className="house-map-container" style={{ width: "100%", maxWidth: 520 }}>
       {scenes.map((scene) => {
         const layout = GRID[scene.scene_id];
         if (!layout) return null;
@@ -55,14 +55,15 @@ export function HouseMap({ scenes, presence, selectedRoom, onSelectRoom }: Props
             style={{ cursor: "pointer" }}
           >
             <rect
+              data-room={scene.scene_id}
               x={layout.x}
               y={layout.y}
               width={layout.w}
               height={layout.h}
-              rx={6}
+              rx={8}
               fill={isSelected ? "var(--room-selected)" : "var(--room-bg)"}
               stroke={isSelected ? "var(--room-border-active)" : "var(--room-border)"}
-              strokeWidth={isSelected ? 2 : 1}
+              strokeWidth={isSelected ? 2.5 : 1}
             />
             <text
               x={layout.x + 10}

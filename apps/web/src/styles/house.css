@@ -1,0 +1,9 @@
+/* ── house map enhancements ── */
+.house-map-container svg rect[data-room] {
+  transition: filter var(--duration-fast), stroke-width var(--duration-fast);
+}
+
+.house-map-container svg rect[data-room]:hover {
+  filter: brightness(1.08);
+  cursor: pointer;
+}

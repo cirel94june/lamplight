@@ -1,0 +1,40 @@
+/* ── event feed card upgrade ── */
+.event-item {
+  display: flex;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  margin: 2px var(--space-xs);
+  transition: background var(--duration-fast);
+}
+
+.event-item:hover {
+  background: var(--bg-recessed);
+}
+
+.event-item:last-child {
+  border-bottom: none;
+}
+
+.event-time {
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--font-size-xs);
+}
+
+.event-avatar {
+  font-size: var(--font-size-base);
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.event-desc {
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+}

@@ -4,7 +4,7 @@
     {
       "name": "web",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite", "--port", "5174", "--host"],
+      "runtimeArgs": ["vite", "--config", "apps/web/vite.config.ts", "--host"],
       "port": 5174
     }
   ]

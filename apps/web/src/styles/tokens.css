@@ -1,0 +1,108 @@
+:root {
+  /* ── palette: day ── */
+  --bg: #FFF8F0;
+  --bg-elevated: #FFFFFF;
+  --bg-recessed: #F5EDE3;
+  --text-primary: #3E2723;
+  --text-secondary: #795548;
+  --text-muted: #A1887F;
+  --border: #E8DDD4;
+  --border-subtle: #EFEBE9;
+
+  /* rooms */
+  --room-bg: #FFF3E0;
+  --room-border: #D7CCC8;
+  --room-border-active: #FF8A65;
+  --room-selected: #FFE0B2;
+
+  /* feed */
+  --feed-bg: #FAFAFA;
+  --feed-border: #EFEBE9;
+
+  /* header */
+  --header-bg: #FFF8F0;
+
+  /* chat bubbles */
+  --bubble-user-bg: #FFE0B2;
+  --bubble-user-text: #3E2723;
+  --bubble-ai-bg: #FFFFFF;
+  --bubble-ai-text: #3E2723;
+  --bubble-ai-border: #E8DDD4;
+
+  /* input */
+  --input-bg: #FFFFFF;
+  --input-border: #D7CCC8;
+  --input-focus-border: #FF8A65;
+
+  /* accents */
+  --accent: #FF8A65;
+  --accent-soft: #FFE0B2;
+
+  /* shadows */
+  --shadow-sm: 0 1px 2px rgba(62, 39, 35, 0.06);
+  --shadow-md: 0 2px 8px rgba(62, 39, 35, 0.08);
+
+  /* radii */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-full: 9999px;
+
+  /* spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+
+  /* typography */
+  --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Noto Serif SC", "Songti SC", Georgia, serif;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.82rem;
+  --font-size-base: 0.9rem;
+  --font-size-lg: 1.1rem;
+  --font-size-xl: 1.25rem;
+
+  /* transitions */
+  --ease-spring: cubic-bezier(.34, 1.46, .5, 1);
+  --duration-fast: 0.15s;
+  --duration-normal: 0.3s;
+}
+
+:root[data-theme="night"] {
+  --bg: #1c1a28;
+  --bg-elevated: #252338;
+  --bg-recessed: #16141f;
+  --text-primary: #E8E0D8;
+  --text-secondary: #A1887F;
+  --text-muted: #7B6B63;
+  --border: #3D3656;
+  --border-subtle: #2D2845;
+
+  --room-bg: #252338;
+  --room-border: #3D3656;
+  --room-border-active: #e8b06a;
+  --room-selected: #33305a;
+
+  --feed-bg: #1E1C30;
+  --feed-border: #2D2845;
+
+  --header-bg: #1c1a28;
+
+  --bubble-user-bg: #3D3656;
+  --bubble-user-text: #E8E0D8;
+  --bubble-ai-bg: #252338;
+  --bubble-ai-text: #E8E0D8;
+  --bubble-ai-border: #3D3656;
+
+  --input-bg: #252338;
+  --input-border: #3D3656;
+  --input-focus-border: #e8b06a;
+
+  --accent: #e8b06a;
+  --accent-soft: #3D3656;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.25);
+}

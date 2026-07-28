@@ -85,4 +85,6 @@ beforeAll(async () => {
     prompt_snapshot TEXT,
     created_at TEXT NOT NULL
   )`);
+
+  await db.run(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_active_scene ON conversations(scene_id) WHERE status = 'active'`);
 });

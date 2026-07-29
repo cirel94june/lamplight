@@ -140,6 +140,116 @@
   color: #e57373;
 }
 
+/* ── settings tabs ── */
+.settings-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 var(--space-md);
+}
+
+.settings-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--duration-fast), border-color var(--duration-fast);
+}
+
+.settings-tab:hover {
+  color: var(--text-primary);
+}
+
+.settings-tab.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
+
+/* ── gateway config ── */
+.gateway-provider {
+  margin-bottom: var(--space-lg);
+}
+
+.gateway-env-badge {
+  display: inline-block;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  background: var(--bg-recessed);
+  padding: 1px var(--space-sm);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.gateway-label {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-sm);
+}
+
+.gateway-input {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--font-size-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  box-sizing: border-box;
+}
+
+.gateway-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.gateway-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.gateway-save-btn {
+  padding: var(--space-xs) var(--space-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity var(--duration-fast);
+}
+
+.gateway-save-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.gateway-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gateway-msg-ok {
+  font-size: var(--font-size-xs);
+  color: #66bb6a;
+}
+
+.gateway-msg-err {
+  font-size: var(--font-size-xs);
+  color: #e57373;
+}
+
+.gateway-loading {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+
 /* ── settings gear button in header ── */
 .settings-gear {
   background: none;

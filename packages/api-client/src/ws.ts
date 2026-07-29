@@ -1,4 +1,4 @@
-export type WsMessageType = "house_event" | "presence_update" | "connected";
+export type WsMessageType = "house_event" | "presence_update" | "connected" | "new_message" | "agent_typing" | "agent_done";
 
 export interface WsMessage {
   type: WsMessageType;

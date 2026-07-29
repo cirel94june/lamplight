@@ -34,19 +34,23 @@ interface Props {
   presence: Presence[];
   selectedRoom: string | null;
   onSelectRoom: (id: string | null) => void;
+  getAvatarUrl?: (agentId: string) => string | undefined;
+  getRoomImageUrl?: (sceneId: string) => string | undefined;
 }
 
-export function HouseMap({ scenes, presence, selectedRoom, onSelectRoom }: Props) {
+export function HouseMap({ scenes, presence, selectedRoom, onSelectRoom, getAvatarUrl, getRoomImageUrl }: Props) {
   const getAIsInRoom = (sceneId: string) =>
     presence.filter((p) => p.scene_id === sceneId);
 
   return (
-    <svg viewBox="-10 -10 500 520" style={{ width: "100%", maxWidth: 520 }}>
+    <svg viewBox="-10 -10 500 520" className="house-map-container" style={{ width: "100%", maxWidth: 520 }}>
       {scenes.map((scene) => {
         const layout = GRID[scene.scene_id];
         if (!layout) return null;
         const ais = getAIsInRoom(scene.scene_id);
         const isSelected = selectedRoom === scene.scene_id;
+
+        const roomImg = getRoomImageUrl?.(scene.scene_id);
 
         return (
           <g
@@ -54,16 +58,34 @@ export function HouseMap({ scenes, presence, selectedRoom, onSelectRoom }: Props
             onClick={() => onSelectRoom(isSelected ? null : scene.scene_id)}
             style={{ cursor: "pointer" }}
           >
+            <defs>
+              <clipPath id={`clip-${scene.scene_id}`}>
+                <rect x={layout.x} y={layout.y} width={layout.w} height={layout.h} rx={8} />
+              </clipPath>
+            </defs>
             <rect
+              data-room={scene.scene_id}
               x={layout.x}
               y={layout.y}
               width={layout.w}
               height={layout.h}
-              rx={6}
+              rx={8}
               fill={isSelected ? "var(--room-selected)" : "var(--room-bg)"}
               stroke={isSelected ? "var(--room-border-active)" : "var(--room-border)"}
-              strokeWidth={isSelected ? 2 : 1}
+              strokeWidth={isSelected ? 2.5 : 1}
             />
+            {roomImg && (
+              <image
+                href={roomImg}
+                x={layout.x}
+                y={layout.y}
+                width={layout.w}
+                height={layout.h}
+                preserveAspectRatio="xMidYMid slice"
+                clipPath={`url(#clip-${scene.scene_id})`}
+                opacity={0.3}
+              />
+            )}
             <text
               x={layout.x + 10}
               y={layout.y + 22}
@@ -81,9 +103,15 @@ export function HouseMap({ scenes, presence, selectedRoom, onSelectRoom }: Props
               const label = AI_LABELS[ai.ai_id] ?? ai.ai_id.charAt(0).toUpperCase();
               const isActive = ai.state === "active";
               const isIdle = ai.state === "idle";
+              const avatarUrl = getAvatarUrl?.(ai.ai_id);
 
               return (
                 <g key={ai.ai_id}>
+                  <defs>
+                    <clipPath id={`avatar-clip-${ai.ai_id}`}>
+                      <circle cx={cx} cy={cy} r={12} />
+                    </clipPath>
+                  </defs>
                   <circle
                     cx={cx}
                     cy={cy}
@@ -91,16 +119,28 @@ export function HouseMap({ scenes, presence, selectedRoom, onSelectRoom }: Props
                     fill={color}
                     opacity={isActive ? 1 : 0.45}
                   />
-                  <text
-                    x={cx}
-                    y={cy + 4}
-                    fontSize={11}
-                    fill="#fff"
-                    textAnchor="middle"
-                    fontWeight={600}
-                  >
-                    {label}
-                  </text>
+                  {avatarUrl ? (
+                    <image
+                      href={avatarUrl}
+                      x={cx - 12}
+                      y={cy - 12}
+                      width={24}
+                      height={24}
+                      clipPath={`url(#avatar-clip-${ai.ai_id})`}
+                      opacity={isActive ? 1 : 0.45}
+                    />
+                  ) : (
+                    <text
+                      x={cx}
+                      y={cy + 4}
+                      fontSize={11}
+                      fill="#fff"
+                      textAnchor="middle"
+                      fontWeight={600}
+                    >
+                      {label}
+                    </text>
+                  )}
                   {isIdle && (
                     <text
                       x={cx}

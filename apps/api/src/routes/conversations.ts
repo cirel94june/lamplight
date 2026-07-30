@@ -8,14 +8,14 @@ import { TurnEvaluator } from "../services/runtime/turn-evaluator.js";
 import { ContextBuilder } from "../services/runtime/context-builder.js";
 import { AgentRuntime } from "../services/runtime/agent-runtime.js";
 import { MockMemoryAdapter } from "../services/runtime/mock-memory-adapter.js";
-import { getGateway } from "../services/gateway/index.js";
+import { initGateway } from "../services/gateway/index.js";
 import { LamplightWebAdapter } from "../adapters/lamplight-web.js";
 
 const conversations = new Hono();
 
 const conversationRepo = new ConversationRepository(db);
 const turnEvaluator = new TurnEvaluator({ db });
-const gateway = getGateway();
+const gateway = initGateway(db);
 const memoryAdapter = new MockMemoryAdapter();
 const contextBuilder = new ContextBuilder({ db, memoryAdapter, conversationRepo });
 const runtime = new AgentRuntime({

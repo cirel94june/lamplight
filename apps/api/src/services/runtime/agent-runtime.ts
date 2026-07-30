@@ -75,6 +75,7 @@ export class AgentRuntime {
         await this.deps.gateway.complete({
           provider_id: providerConfig.provider_id,
           model_id: providerConfig.model_id,
+          api_provider_id: providerConfig.api_provider_id,
           messages,
           max_tokens: runtimeConfig?.max_response_tokens ?? undefined,
           temperature: runtimeConfig?.temperature ?? undefined,

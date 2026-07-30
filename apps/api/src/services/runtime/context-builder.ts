@@ -68,7 +68,7 @@ export class ContextBuilder {
 
   getProviderConfig(agentId: string) {
     return this.getAgentProfile(agentId).then((p) =>
-      p ? { provider_id: p.provider_id, model_id: p.model_id } : null,
+      p ? { provider_id: p.provider_id, model_id: p.model_id, api_provider_id: p.api_provider_id ?? "" } : null,
     );
   }
 

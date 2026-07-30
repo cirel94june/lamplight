@@ -10,6 +10,8 @@ export const modelConfigSchema = z.object({
   provider_id: z.string().min(1),
   /** 模型 ID：claude-opus-4-6 / gpt-4o / gemini-2.5-pro 等 */
   model_id: z.string().min(1),
+  /** 指向 api_providers 表，决定用哪个 endpoint + key */
+  api_provider_id: z.string().min(1),
 });
 export type ModelConfig = z.infer<typeof modelConfigSchema>;
 

@@ -14,6 +14,7 @@ export type GatewayMessage = z.infer<typeof gatewayMessageSchema>;
 export const gatewayCompletionRequestSchema = z.object({
   provider_id: z.string().min(1),
   model_id: z.string().min(1),
+  api_provider_id: z.string().min(1),
   messages: z.array(gatewayMessageSchema).min(1),
   max_tokens: z.number().int().positive().optional(),
   temperature: z.number().min(0).max(2).optional(),

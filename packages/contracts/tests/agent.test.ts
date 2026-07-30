@@ -12,6 +12,7 @@ describe("ModelConfig", () => {
       modelConfigSchema.safeParse({
         provider_id: "anthropic",
         model_id: "claude-opus-4-6",
+        api_provider_id: "test-provider-1",
       }).success
     ).toBe(true);
   });
@@ -31,7 +32,7 @@ describe("ModelConfig", () => {
 const validProfile = {
   agent_id: "cloudy",
   display_name: "小克",
-  model_config: { provider_id: "anthropic", model_id: "claude-opus-4-6" },
+  model_config: { provider_id: "anthropic", model_id: "claude-opus-4-6", api_provider_id: "test-provider-1" },
   memory_scope: "cloudy",
 } as const;
 

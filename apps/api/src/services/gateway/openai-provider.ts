@@ -9,12 +9,12 @@ import type {
 export class OpenAIProvider implements AIGateway {
   private client: OpenAI;
 
-  constructor(apiKey: string, baseURL?: string) {
+  constructor(apiKey: string, baseURL: string) {
     this.client = new OpenAI({
       apiKey,
+      baseURL,
       maxRetries: 0,
       timeout: 30_000,
-      ...(baseURL ? { baseURL } : {}),
     });
   }
 

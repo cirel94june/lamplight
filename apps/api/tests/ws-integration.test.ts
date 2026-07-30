@@ -17,9 +17,15 @@ vi.mock("../src/services/gateway/index.js", () => {
   };
   return {
     createGateway: () => mockGateway,
+    getGateway: () => mockGateway,
+    initGateway: () => mockGateway,
+    invalidateProvider: vi.fn(),
+    invalidateAllProviders: vi.fn(),
     GatewayService: vi.fn(() => mockGateway),
     AnthropicProvider: vi.fn(),
     OpenAIProvider: vi.fn(),
+    encrypt: vi.fn(),
+    decrypt: vi.fn(),
   };
 });
 

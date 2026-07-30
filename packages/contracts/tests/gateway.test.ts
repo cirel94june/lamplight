@@ -26,6 +26,7 @@ describe("gatewayCompletionRequestSchema", () => {
   const valid = {
     provider_id: "anthropic",
     model_id: "claude-opus-4-6",
+    api_provider_id: "test-provider-1",
     messages: [{ role: "user", content: "hi" }],
   };
 

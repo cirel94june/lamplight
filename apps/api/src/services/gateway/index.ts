@@ -1,68 +1,82 @@
 export { AnthropicProvider } from "./anthropic-provider.js";
 export { OpenAIProvider } from "./openai-provider.js";
 export { GatewayService } from "./gateway-service.js";
+export { encrypt, decrypt } from "./crypto.js";
 
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { eq } from "drizzle-orm";
+import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { GatewayService } from "./gateway-service.js";
 import { AnthropicProvider } from "./anthropic-provider.js";
 import { OpenAIProvider } from "./openai-provider.js";
+import { decrypt } from "./crypto.js";
+import type { AIGateway } from "@lamplight/contracts";
+import * as schema from "../../db/schema.js";
 
-export interface GatewayConfig {
-  anthropic_api_key?: string;
-  anthropic_base_url?: string;
-  openai_api_key?: string;
-  openai_base_url?: string;
-}
+export type ProviderResolver = (apiProviderId: string) => Promise<AIGateway>;
 
-function getConfigPath(): string {
-  if (process.env.ASSETS_DIR) return resolve(process.env.ASSETS_DIR, "../gateway-config.json");
-  return resolve(import.meta.dirname ?? ".", "../../../data/gateway-config.json");
-}
-
-export function loadGatewayConfig(): GatewayConfig {
-  try {
-    return JSON.parse(readFileSync(getConfigPath(), "utf-8"));
-  } catch {
-    return {};
+function createProviderInstance(providerType: string, apiKey: string, baseURL: string): AIGateway {
+  switch (providerType) {
+    case "anthropic":
+      return new AnthropicProvider(apiKey, baseURL);
+    case "openai":
+    case "deepseek":
+    default:
+      return new OpenAIProvider(apiKey, baseURL);
   }
 }
 
-export function saveGatewayConfig(config: GatewayConfig): void {
-  const configPath = getConfigPath();
-  mkdirSync(dirname(configPath), { recursive: true });
-  writeFileSync(configPath, JSON.stringify(config, null, 2));
-}
+export function createResolver(db: LibSQLDatabase<typeof schema>): ProviderResolver {
+  const cache = new Map<string, AIGateway>();
 
-function resolveConfig(): GatewayConfig {
-  const file = loadGatewayConfig();
-  return {
-    anthropic_api_key: process.env.ANTHROPIC_API_KEY || file.anthropic_api_key,
-    anthropic_base_url: process.env.ANTHROPIC_BASE_URL || file.anthropic_base_url,
-    openai_api_key: process.env.OPENAI_API_KEY || file.openai_api_key,
-    openai_base_url: process.env.OPENAI_BASE_URL || file.openai_base_url,
-  };
+  const resolver: ProviderResolver & { invalidate: (id: string) => void; invalidateAll: () => void } = Object.assign(
+    async (apiProviderId: string): Promise<AIGateway> => {
+      const cached = cache.get(apiProviderId);
+      if (cached) return cached;
+
+      const rows = await db
+        .select()
+        .from(schema.apiProviders)
+        .where(eq(schema.apiProviders.id, apiProviderId))
+        .limit(1);
+
+      const row = rows[0];
+      if (!row) throw new Error(`API provider not found: ${apiProviderId}`);
+      if (!row.is_active) throw new Error(`API provider is inactive: ${row.display_name}`);
+
+      const apiKey = decrypt(row.api_key_encrypted);
+      const provider = createProviderInstance(row.provider_type, apiKey, row.base_url);
+      cache.set(apiProviderId, provider);
+      return provider;
+    },
+    {
+      invalidate: (id: string) => cache.delete(id),
+      invalidateAll: () => cache.clear(),
+    },
+  );
+
+  return resolver;
 }
 
 let _gateway: GatewayService | null = null;
+let _resolver: (ProviderResolver & { invalidate: (id: string) => void; invalidateAll: () => void }) | null = null;
 
-export function getGateway(): GatewayService {
-  if (!_gateway) {
-    _gateway = new GatewayService();
-    applyConfig(_gateway);
-  }
+export function initGateway(db: LibSQLDatabase<typeof schema>): GatewayService {
+  _resolver = createResolver(db) as typeof _resolver;
+  _gateway = new GatewayService(_resolver!);
   return _gateway;
 }
 
-export function applyConfig(gateway: GatewayService, override?: GatewayConfig): void {
-  const config = override ?? resolveConfig();
+export function getGateway(): GatewayService {
+  if (!_gateway) throw new Error("Gateway not initialized — call initGateway(db) first");
+  return _gateway;
+}
 
-  if (config.anthropic_api_key) {
-    gateway.register("anthropic", new AnthropicProvider(config.anthropic_api_key, config.anthropic_base_url));
-  }
-  if (config.openai_api_key) {
-    gateway.register("openai", new OpenAIProvider(config.openai_api_key, config.openai_base_url));
-  }
+export function invalidateProvider(apiProviderId: string): void {
+  _resolver?.invalidate(apiProviderId);
+}
+
+export function invalidateAllProviders(): void {
+  _resolver?.invalidateAll();
 }
 
 /** @deprecated Use getGateway() instead */

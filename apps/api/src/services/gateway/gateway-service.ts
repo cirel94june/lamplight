@@ -5,8 +5,15 @@ import type {
   GatewayError,
 } from "@lamplight/contracts";
 
+export type ProviderResolver = (apiProviderId: string) => Promise<AIGateway>;
+
 export class GatewayService implements AIGateway {
   private providers = new Map<string, AIGateway>();
+  private resolver: ProviderResolver | null;
+
+  constructor(resolver?: ProviderResolver) {
+    this.resolver = resolver ?? null;
+  }
 
   register(providerId: string, provider: AIGateway): void {
     this.providers.set(providerId, provider);
@@ -15,7 +22,24 @@ export class GatewayService implements AIGateway {
   async complete(
     request: GatewayCompletionRequest,
   ): Promise<GatewayCompletionResponse> {
-    const provider = this.providers.get(request.provider_id);
+    let provider: AIGateway | undefined;
+
+    if (request.api_provider_id && this.resolver) {
+      try {
+        provider = await this.resolver(request.api_provider_id);
+      } catch (err) {
+        const error: GatewayError = {
+          code: "provider_unavailable",
+          message: err instanceof Error ? err.message : String(err),
+          provider_id: request.provider_id,
+          retryable: false,
+        };
+        throw error;
+      }
+    } else {
+      provider = this.providers.get(request.provider_id);
+    }
+
     if (!provider) {
       const error: GatewayError = {
         code: "provider_unavailable",

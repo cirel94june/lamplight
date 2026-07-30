@@ -40,11 +40,27 @@ export const aiPresence = sqliteTable("ai_presence", {
   updated_at: text("updated_at").notNull(),
 });
 
+export const apiProviders = sqliteTable("api_providers", {
+  id: text("id").primaryKey(),
+  provider_type: text("provider_type").notNull(),
+  display_name: text("display_name").notNull(),
+  base_url: text("base_url").notNull(),
+  api_key_encrypted: text("api_key_encrypted").notNull(),
+  is_active: integer("is_active").notNull().default(1),
+  created_at: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+  updated_at: text("updated_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
 export const agentProfiles = sqliteTable("agent_profiles", {
   agent_id: text("agent_id").primaryKey(),
   display_name: text("display_name").notNull(),
   provider_id: text("provider_id").notNull(),
   model_id: text("model_id").notNull(),
+  api_provider_id: text("api_provider_id"),
   memory_scope: text("memory_scope").notNull(),
   tool_policy_id: text("tool_policy_id"),
   prompt_version: text("prompt_version"),

@@ -37,11 +37,23 @@ beforeAll(async () => {
     updated_at TEXT NOT NULL
   )`);
 
+  await db.run(sql`CREATE TABLE IF NOT EXISTS api_providers (
+    id TEXT PRIMARY KEY NOT NULL,
+    provider_type TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    base_url TEXT NOT NULL,
+    api_key_encrypted TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+
   await db.run(sql`CREATE TABLE IF NOT EXISTS agent_profiles (
     agent_id TEXT PRIMARY KEY NOT NULL,
     display_name TEXT NOT NULL,
     provider_id TEXT NOT NULL,
     model_id TEXT NOT NULL,
+    api_provider_id TEXT,
     memory_scope TEXT NOT NULL,
     tool_policy_id TEXT,
     prompt_version TEXT,

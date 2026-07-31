@@ -55,12 +55,15 @@ settings.get("/providers", async (c) => {
 });
 
 settings.post("/providers", async (c) => {
-  const body = await c.req.json<{
-    provider_type: string;
-    display_name: string;
-    base_url: string;
-    api_key: string;
-  }>();
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: "Invalid JSON body" }, 400);
+  }
+  if (!body || typeof body !== "object") {
+    return c.json({ ok: false, error: "Request body must be a JSON object" }, 400);
+  }
 
   if (!body.provider_type || !body.display_name || !body.base_url || !body.api_key) {
     return c.json({ ok: false, error: "provider_type, display_name, base_url, api_key are required" }, 400);
@@ -93,19 +96,34 @@ settings.post("/providers", async (c) => {
 
 settings.put("/providers/:id", async (c) => {
   const id = c.req.param("id");
-  const body = await c.req.json<{
-    provider_type?: string;
-    display_name?: string;
-    base_url?: string;
-    api_key?: string;
-    is_active?: boolean;
-  }>();
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: "Invalid JSON body" }, 400);
+  }
+  if (!body || typeof body !== "object") {
+    return c.json({ ok: false, error: "Request body must be a JSON object" }, 400);
+  }
 
   const existing = await db.select().from(schema.apiProviders).where(eq(schema.apiProviders.id, id)).limit(1);
   if (!existing[0]) return c.json({ ok: false, error: "not found" }, 404);
 
   if (body.provider_type !== undefined && !isSupportedProviderType(body.provider_type)) {
     return c.json({ ok: false, error: `Unsupported provider_type: ${body.provider_type}. Supported: ${SUPPORTED_PROVIDER_TYPES.join(", ")}` }, 400);
+  }
+
+  if (body.provider_type !== undefined && body.provider_type !== existing[0].provider_type) {
+    const bindings = await db
+      .select({ agent_id: schema.agentModelBindings.agent_id })
+      .from(schema.agentModelBindings)
+      .where(eq(schema.agentModelBindings.api_provider_id, id));
+    if (bindings.length > 0) {
+      return c.json({
+        ok: false,
+        error: `Cannot change provider_type while bound to agents: ${bindings.map((b) => b.agent_id).join(", ")}. Remove bindings first.`,
+      }, 409);
+    }
   }
 
   if (body.base_url !== undefined) {
@@ -213,11 +231,15 @@ settings.get("/agents", async (c) => {
 
 settings.put("/agents/:agent_id/model-config", async (c) => {
   const agentId = c.req.param("agent_id");
-  const body = await c.req.json<{
-    provider_id: string;
-    model_id: string;
-    api_provider_id: string;
-  }>();
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: "Invalid JSON body" }, 400);
+  }
+  if (!body || typeof body !== "object") {
+    return c.json({ ok: false, error: "Request body must be a JSON object" }, 400);
+  }
 
   if (!body.provider_id || !body.model_id || !body.api_provider_id) {
     return c.json({ ok: false, error: "provider_id, model_id, api_provider_id are required" }, 400);

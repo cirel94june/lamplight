@@ -158,11 +158,14 @@ function ProviderSettings() {
     else alert(json.error ?? "删除失败");
   }, [load]);
 
-  const handleTest = useCallback(async (id: string) => {
+  const handleTest = useCallback(async (id: string, model?: string) => {
     setTesting(id);
     setTestResult((r) => ({ ...r, [id]: "testing" }));
     try {
-      const res = await fetch(`/api/settings/providers/${id}/test`, { method: "POST" });
+      const url = model
+        ? `/api/settings/providers/${id}/test?model=${encodeURIComponent(model)}`
+        : `/api/settings/providers/${id}/test`;
+      const res = await fetch(url, { method: "POST" });
       const json = await res.json();
       setTestResult((r) => ({ ...r, [id]: json.ok ? "connected" : json.error ?? "failed" }));
     } catch {

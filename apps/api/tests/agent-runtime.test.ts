@@ -154,6 +154,7 @@ describe("Agent Runtime integration", () => {
     });
     turnEvaluator = new TurnEvaluator({ db });
     runtime = new AgentRuntime({
+      db,
       gateway,
       contextBuilder,
       conversationRepo,
@@ -943,6 +944,7 @@ describe("Agent Runtime integration", () => {
       };
 
       const failRuntime = new AgentRuntime({
+        db,
         gateway: failingGateway,
         contextBuilder,
         conversationRepo,

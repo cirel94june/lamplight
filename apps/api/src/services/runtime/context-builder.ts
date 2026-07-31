@@ -78,6 +78,9 @@ export class ContextBuilder {
       provider_id: binding.provider_id,
       model_id: binding.model_id,
       api_provider_id: binding.api_provider_id,
+      timeout_ms: binding.timeout_ms ?? 30000,
+      retry_max: binding.retry_max ?? 3,
+      fault_state: binding.fault_state as "ok" | "degraded" | "offline",
     };
   }
 

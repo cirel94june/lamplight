@@ -8,7 +8,7 @@ CREATE TABLE `api_providers` (
   `created_at` text NOT NULL DEFAULT (datetime('now')),
   `updated_at` text NOT NULL DEFAULT (datetime('now'))
 );
-
+--> statement-breakpoint
 CREATE TABLE `agent_model_bindings` (
   `id` text PRIMARY KEY NOT NULL,
   `agent_id` text NOT NULL UNIQUE,
@@ -25,3 +25,20 @@ CREATE TABLE `agent_model_bindings` (
   `created_at` text NOT NULL DEFAULT (datetime('now')),
   `updated_at` text NOT NULL DEFAULT (datetime('now'))
 );
+--> statement-breakpoint
+-- Migrate: rebuild agent_profiles without provider_id/model_id
+CREATE TABLE `agent_profiles_new` (
+  `agent_id` text PRIMARY KEY NOT NULL,
+  `display_name` text NOT NULL,
+  `memory_scope` text NOT NULL,
+  `tool_policy_id` text,
+  `prompt_version` text,
+  `created_at` text NOT NULL DEFAULT (datetime('now'))
+);
+--> statement-breakpoint
+INSERT INTO `agent_profiles_new` (`agent_id`, `display_name`, `memory_scope`, `tool_policy_id`, `prompt_version`, `created_at`)
+  SELECT `agent_id`, `display_name`, `memory_scope`, `tool_policy_id`, `prompt_version`, `created_at` FROM `agent_profiles`;
+--> statement-breakpoint
+DROP TABLE `agent_profiles`;
+--> statement-breakpoint
+ALTER TABLE `agent_profiles_new` RENAME TO `agent_profiles`;

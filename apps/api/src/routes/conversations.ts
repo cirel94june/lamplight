@@ -19,6 +19,7 @@ const gateway = initGateway(db);
 const memoryAdapter = new MockMemoryAdapter();
 const contextBuilder = new ContextBuilder({ db, memoryAdapter, conversationRepo });
 const runtime = new AgentRuntime({
+  db,
   gateway,
   contextBuilder,
   conversationRepo,

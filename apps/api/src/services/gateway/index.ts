@@ -66,16 +66,90 @@ export function initGateway(db: LibSQLDatabase<typeof schema>): GatewayService {
   _gateway = new GatewayService(_resolver!);
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const anthropicBaseUrl = process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
   if (anthropicKey) {
-    _gateway.register("anthropic", new AnthropicProvider(anthropicKey, "https://api.anthropic.com"));
+    _gateway.register("anthropic", new AnthropicProvider(anthropicKey, anthropicBaseUrl));
   }
 
   const openaiKey = process.env.OPENAI_API_KEY;
+  const openaiBaseUrl = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
   if (openaiKey) {
-    _gateway.register("openai", new OpenAIProvider(openaiKey, "https://api.openai.com/v1"));
+    _gateway.register("openai", new OpenAIProvider(openaiKey, openaiBaseUrl));
+  }
+
+  if (anthropicKey || openaiKey) {
+    provisionEnvProviders(db, anthropicKey, anthropicBaseUrl, openaiKey, openaiBaseUrl)
+      .catch((err) => console.error("[gateway] env provider provisioning failed:", err));
   }
 
   return _gateway;
+}
+
+async function provisionEnvProviders(
+  db: LibSQLDatabase<typeof schema>,
+  anthropicKey: string | undefined,
+  anthropicBaseUrl: string,
+  openaiKey: string | undefined,
+  openaiBaseUrl: string,
+): Promise<void> {
+  if (anthropicKey) {
+    await ensureEnvProvider(db, "env-anthropic", "anthropic", anthropicBaseUrl, anthropicKey);
+  }
+  if (openaiKey) {
+    await ensureEnvProvider(db, "env-openai", "openai", openaiBaseUrl, openaiKey);
+  }
+  await autoBindUnboundAgents(db);
+}
+
+async function ensureEnvProvider(
+  db: LibSQLDatabase<typeof schema>,
+  id: string,
+  providerType: string,
+  baseUrl: string,
+  apiKey: string,
+): Promise<void> {
+  const existing = await db
+    .select()
+    .from(schema.apiProviders)
+    .where(eq(schema.apiProviders.id, id))
+    .limit(1);
+  if (existing[0]) return;
+
+  const { encrypt: enc } = await import("./crypto.js");
+  const now = new Date().toISOString();
+  await db.insert(schema.apiProviders).values({
+    id,
+    provider_type: providerType,
+    display_name: `${providerType} (env)`,
+    base_url: baseUrl,
+    api_key_encrypted: enc(apiKey),
+    is_active: 1,
+    created_at: now,
+    updated_at: now,
+  });
+}
+
+async function autoBindUnboundAgents(db: LibSQLDatabase<typeof schema>): Promise<void> {
+  const agents = await db.select({ agent_id: schema.agentProfiles.agent_id }).from(schema.agentProfiles);
+  const bindings = await db.select({ agent_id: schema.agentModelBindings.agent_id }).from(schema.agentModelBindings);
+  const boundIds = new Set(bindings.map((b) => b.agent_id));
+
+  const envAnthropicExists = await db.select().from(schema.apiProviders).where(eq(schema.apiProviders.id, "env-anthropic")).limit(1);
+  if (!envAnthropicExists[0]) return;
+
+  const now = new Date().toISOString();
+  for (const agent of agents) {
+    if (boundIds.has(agent.agent_id)) continue;
+    await db.insert(schema.agentModelBindings).values({
+      id: `env-bind-${agent.agent_id}`,
+      agent_id: agent.agent_id,
+      api_provider_id: "env-anthropic",
+      provider_id: "anthropic",
+      model_id: "claude-haiku-4-5",
+      created_at: now,
+      updated_at: now,
+    });
+  }
 }
 
 export function getGateway(): GatewayService {

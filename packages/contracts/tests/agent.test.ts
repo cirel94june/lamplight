@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentModelBindingSchema,
   agentProfileSchema,
   agentRuntimeConfigSchema,
   channelBindingSchema,
@@ -29,10 +30,51 @@ describe("ModelConfig", () => {
   });
 });
 
+describe("AgentModelBinding", () => {
+  const validBinding = {
+    agent_id: "cloudy",
+    api_provider_id: "test-provider-1",
+    provider_id: "anthropic",
+    model_id: "claude-opus-4-6",
+  };
+
+  it("最小合法 binding 能通过", () => {
+    expect(agentModelBindingSchema.safeParse(validBinding).success).toBe(true);
+  });
+
+  it("带可选字段能通过", () => {
+    expect(
+      agentModelBindingSchema.safeParse({
+        ...validBinding,
+        timeout_ms: 60000,
+        retry_max: 5,
+        fault_state: "degraded",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("fault_state 只接受 ok/degraded/offline", () => {
+    expect(
+      agentModelBindingSchema.safeParse({ ...validBinding, fault_state: "broken" }).success,
+    ).toBe(false);
+  });
+
+  it("agent_id 不接受空字符串", () => {
+    expect(
+      agentModelBindingSchema.safeParse({ ...validBinding, agent_id: "" }).success,
+    ).toBe(false);
+  });
+
+  it("api_provider_id 不接受空字符串", () => {
+    expect(
+      agentModelBindingSchema.safeParse({ ...validBinding, api_provider_id: "" }).success,
+    ).toBe(false);
+  });
+});
+
 const validProfile = {
   agent_id: "cloudy",
   display_name: "小克",
-  model_config: { provider_id: "anthropic", model_id: "claude-opus-4-6", api_provider_id: "test-provider-1" },
   memory_scope: "cloudy",
 } as const;
 
@@ -72,9 +114,16 @@ describe("AgentProfile", () => {
     ).toBe(false);
   });
 
-  it("model_config 必填", () => {
-    const { model_config, ...rest } = validProfile;
-    expect(agentProfileSchema.safeParse(rest).success).toBe(false);
+  it("profile 不包含 model_config（已拆到 AgentModelBinding）", () => {
+    const withModelConfig = {
+      ...validProfile,
+      model_config: { provider_id: "anthropic", model_id: "claude-opus-4-6", api_provider_id: "p1" },
+    };
+    const result = agentProfileSchema.safeParse(withModelConfig);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect("model_config" in result.data).toBe(false);
+    }
   });
 });
 

@@ -51,13 +51,27 @@ beforeAll(async () => {
   await db.run(sql`CREATE TABLE IF NOT EXISTS agent_profiles (
     agent_id TEXT PRIMARY KEY NOT NULL,
     display_name TEXT NOT NULL,
-    provider_id TEXT NOT NULL,
-    model_id TEXT NOT NULL,
-    api_provider_id TEXT,
     memory_scope TEXT NOT NULL,
     tool_policy_id TEXT,
     prompt_version TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+
+  await db.run(sql`CREATE TABLE IF NOT EXISTS agent_model_bindings (
+    id TEXT PRIMARY KEY NOT NULL,
+    agent_id TEXT NOT NULL UNIQUE,
+    api_provider_id TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    timeout_ms INTEGER DEFAULT 30000,
+    retry_max INTEGER DEFAULT 3,
+    fault_state TEXT NOT NULL DEFAULT 'ok',
+    fault_since TEXT,
+    last_call_at TEXT,
+    total_calls INTEGER NOT NULL DEFAULT 0,
+    total_errors INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
 
   await db.run(sql`CREATE TABLE IF NOT EXISTS agent_runtime_configs (

@@ -77,34 +77,19 @@ async function seedTestData() {
   // Agent profiles
   await db.run(sql`DELETE FROM agent_profiles`);
   await db.insert(schema.agentProfiles).values([
-    {
-      agent_id: "xiaoke",
-      display_name: "小克",
-      provider_id: "anthropic",
-      model_id: "claude-opus-4-6",
-      memory_scope: "xiaoke",
-    },
-    {
-      agent_id: "lucien",
-      display_name: "Lucien",
-      provider_id: "anthropic",
-      model_id: "claude-opus-4-6",
-      memory_scope: "lucien",
-    },
-    {
-      agent_id: "jasper",
-      display_name: "Jasper",
-      provider_id: "openai",
-      model_id: "gpt-4o",
-      memory_scope: "jasper",
-    },
-    {
-      agent_id: "therapist",
-      display_name: "心理咨询师",
-      provider_id: "anthropic",
-      model_id: "claude-opus-4-6",
-      memory_scope: "therapist",
-    },
+    { agent_id: "xiaoke", display_name: "小克", memory_scope: "xiaoke" },
+    { agent_id: "lucien", display_name: "Lucien", memory_scope: "lucien" },
+    { agent_id: "jasper", display_name: "Jasper", memory_scope: "jasper" },
+    { agent_id: "therapist", display_name: "心理咨询师", memory_scope: "therapist" },
+  ]);
+
+  // Agent model bindings
+  await db.run(sql`DELETE FROM agent_model_bindings`);
+  await db.insert(schema.agentModelBindings).values([
+    { id: "bind-xiaoke", agent_id: "xiaoke", api_provider_id: "test-provider", provider_id: "anthropic", model_id: "claude-opus-4-6" },
+    { id: "bind-lucien", agent_id: "lucien", api_provider_id: "test-provider", provider_id: "anthropic", model_id: "claude-opus-4-6" },
+    { id: "bind-jasper", agent_id: "jasper", api_provider_id: "test-provider", provider_id: "openai", model_id: "gpt-4o" },
+    { id: "bind-therapist", agent_id: "therapist", api_provider_id: "test-provider", provider_id: "anthropic", model_id: "claude-opus-4-6" },
   ]);
 
   // Runtime configs

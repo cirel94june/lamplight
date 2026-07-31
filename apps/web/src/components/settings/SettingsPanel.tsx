@@ -14,12 +14,18 @@ interface ApiProvider {
   is_active: boolean;
 }
 
+interface AgentBinding {
+  id: string;
+  api_provider_id: string;
+  provider_id: string;
+  model_id: string;
+  fault_state: string;
+}
+
 interface AgentConfig {
   agent_id: string;
   display_name: string;
-  provider_id: string;
-  model_id: string;
-  api_provider_id: string | null;
+  binding: AgentBinding | null;
 }
 
 // ── Provider Management ──
@@ -83,7 +89,6 @@ function ProviderForm({ provider, onSaved, onCancel }: {
         >
           <option value="anthropic">Anthropic</option>
           <option value="openai">OpenAI</option>
-          <option value="google">Google</option>
           <option value="deepseek">DeepSeek</option>
         </select>
       </label>
@@ -239,26 +244,28 @@ function AgentModelSettings() {
     }).catch(() => setLoading(false));
   }, []);
 
-  const handleSave = useCallback(async (agent: AgentConfig, providerId: string, modelId: string, apiProviderId: string) => {
-    setSaving(agent.agent_id);
-    setMessage((m) => ({ ...m, [agent.agent_id]: "" }));
+  const handleSave = useCallback(async (agentId: string, providerId: string, modelId: string, apiProviderId: string) => {
+    setSaving(agentId);
+    setMessage((m) => ({ ...m, [agentId]: "" }));
     try {
-      const res = await fetch(`/api/settings/agents/${agent.agent_id}/model-config`, {
+      const res = await fetch(`/api/settings/agents/${agentId}/model-config`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider_id: providerId, model_id: modelId, api_provider_id: apiProviderId }),
       });
       const json = await res.json();
       if (json.ok) {
-        setMessage((m) => ({ ...m, [agent.agent_id]: "saved" }));
+        setMessage((m) => ({ ...m, [agentId]: "saved" }));
         setAgents((prev) => prev.map((a) =>
-          a.agent_id === agent.agent_id ? { ...a, provider_id: providerId, model_id: modelId, api_provider_id: apiProviderId } : a,
+          a.agent_id === agentId
+            ? { ...a, binding: { id: a.binding?.id ?? "", api_provider_id: apiProviderId, provider_id: providerId, model_id: modelId, fault_state: "ok" } }
+            : a,
         ));
       } else {
-        setMessage((m) => ({ ...m, [agent.agent_id]: json.error ?? "failed" }));
+        setMessage((m) => ({ ...m, [agentId]: json.error ?? "failed" }));
       }
     } catch {
-      setMessage((m) => ({ ...m, [agent.agent_id]: "failed" }));
+      setMessage((m) => ({ ...m, [agentId]: "failed" }));
     }
     setSaving(null);
   }, []);
@@ -292,11 +299,11 @@ function AgentConfigCard({ agent, emoji, providers, saving, message, onSave }: {
   providers: ApiProvider[];
   saving: boolean;
   message?: string;
-  onSave: (agent: AgentConfig, providerId: string, modelId: string, apiProviderId: string) => void;
+  onSave: (agentId: string, providerId: string, modelId: string, apiProviderId: string) => void;
 }) {
-  const [providerId, setProviderId] = useState(agent.provider_id);
-  const [modelId, setModelId] = useState(agent.model_id);
-  const [apiProviderId, setApiProviderId] = useState(agent.api_provider_id ?? "");
+  const [providerId, setProviderId] = useState(agent.binding?.provider_id ?? "");
+  const [modelId, setModelId] = useState(agent.binding?.model_id ?? "");
+  const [apiProviderId, setApiProviderId] = useState(agent.binding?.api_provider_id ?? "");
 
   return (
     <div className="provider-card">
@@ -332,7 +339,7 @@ function AgentConfigCard({ agent, emoji, providers, saving, message, onSave }: {
         <button
           className="gateway-save-btn"
           disabled={saving || !apiProviderId}
-          onClick={() => onSave(agent, providerId, modelId, apiProviderId)}
+          onClick={() => onSave(agent.agent_id, providerId, modelId, apiProviderId)}
         >
           {saving ? "保存中…" : "保存"}
         </button>

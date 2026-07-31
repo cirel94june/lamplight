@@ -548,13 +548,11 @@ describe("Conversation API", () => {
       // Seed agent profiles so TurnEvaluator returns eligible agents
       await db.run(sql`DELETE FROM agent_profiles`);
       await db.insert(schema.agentProfiles).values([
-        {
-          agent_id: "xiaoke",
-          display_name: "小克",
-          provider_id: "anthropic",
-          model_id: "claude-opus-4-6",
-          memory_scope: "xiaoke",
-        },
+        { agent_id: "xiaoke", display_name: "小克", memory_scope: "xiaoke" },
+      ]);
+      await db.run(sql`DELETE FROM agent_model_bindings`);
+      await db.insert(schema.agentModelBindings).values([
+        { id: "bind-xiaoke", agent_id: "xiaoke", api_provider_id: "test-provider", provider_id: "anthropic", model_id: "claude-opus-4-6" },
       ]);
       await db.run(sql`DELETE FROM agent_runtime_configs`);
       await db.insert(schema.agentRuntimeConfigs).values([

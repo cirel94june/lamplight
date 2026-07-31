@@ -20,8 +20,9 @@ function createProviderInstance(providerType: string, apiKey: string, baseURL: s
       return new AnthropicProvider(apiKey, baseURL);
     case "openai":
     case "deepseek":
-    default:
       return new OpenAIProvider(apiKey, baseURL);
+    default:
+      throw new Error(`Unsupported provider type: ${providerType}`);
   }
 }
 
@@ -63,6 +64,17 @@ let _resolver: (ProviderResolver & { invalidate: (id: string) => void; invalidat
 export function initGateway(db: LibSQLDatabase<typeof schema>): GatewayService {
   _resolver = createResolver(db) as typeof _resolver;
   _gateway = new GatewayService(_resolver!);
+
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (anthropicKey) {
+    _gateway.register("anthropic", new AnthropicProvider(anthropicKey, "https://api.anthropic.com"));
+  }
+
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey) {
+    _gateway.register("openai", new OpenAIProvider(openaiKey, "https://api.openai.com/v1"));
+  }
+
   return _gateway;
 }
 

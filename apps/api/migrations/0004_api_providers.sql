@@ -26,7 +26,14 @@ CREATE TABLE `agent_model_bindings` (
   `updated_at` text NOT NULL DEFAULT (datetime('now'))
 );
 --> statement-breakpoint
--- Migrate: rebuild agent_profiles without provider_id/model_id
+-- Migrate existing per-agent provider/model into bindings before dropping columns.
+-- api_provider_id uses 'env-{provider_id}' convention; initGateway creates matching rows.
+INSERT INTO `agent_model_bindings` (`id`, `agent_id`, `api_provider_id`, `provider_id`, `model_id`)
+  SELECT 'migrated-' || `agent_id`, `agent_id`, 'env-' || `provider_id`, `provider_id`, `model_id`
+  FROM `agent_profiles`
+  WHERE `provider_id` IS NOT NULL AND `model_id` IS NOT NULL;
+--> statement-breakpoint
+-- Rebuild agent_profiles without provider_id/model_id columns
 CREATE TABLE `agent_profiles_new` (
   `agent_id` text PRIMARY KEY NOT NULL,
   `display_name` text NOT NULL,

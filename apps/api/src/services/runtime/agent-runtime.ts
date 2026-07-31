@@ -80,15 +80,24 @@ export class AgentRuntime {
         conversation_kind: opts.conversation_kind as "house_chat",
       });
 
-      const response: GatewayCompletionResponse =
-        await this.deps.gateway.complete({
-          provider_id: providerConfig.provider_id,
-          model_id: providerConfig.model_id,
-          api_provider_id: providerConfig.api_provider_id,
-          messages,
-          max_tokens: runtimeConfig?.max_response_tokens ?? undefined,
-          temperature: runtimeConfig?.temperature ?? undefined,
-        });
+      const completionPromise = this.deps.gateway.complete({
+        provider_id: providerConfig.provider_id,
+        model_id: providerConfig.model_id,
+        api_provider_id: providerConfig.api_provider_id,
+        messages,
+        max_tokens: runtimeConfig?.max_response_tokens ?? undefined,
+        temperature: runtimeConfig?.temperature ?? undefined,
+      });
+
+      const timeoutMs = providerConfig.timeout_ms;
+      const response: GatewayCompletionResponse = await (timeoutMs > 0
+        ? Promise.race([
+            completionPromise,
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`Gateway timeout after ${timeoutMs}ms`)), timeoutMs),
+            ),
+          ])
+        : completionPromise);
 
       const messageId = `msg_${randomUUID()}`;
       const now = new Date().toISOString();
@@ -135,7 +144,12 @@ export class AgentRuntime {
       if (isError) {
         updates.total_errors = sql`total_errors + 1`;
         const rows = await this.deps.db
-          .select({ total_errors: schema.agentModelBindings.total_errors, total_calls: schema.agentModelBindings.total_calls })
+          .select({
+            total_errors: schema.agentModelBindings.total_errors,
+            total_calls: schema.agentModelBindings.total_calls,
+            retry_max: schema.agentModelBindings.retry_max,
+            fault_state: schema.agentModelBindings.fault_state,
+          })
           .from(schema.agentModelBindings)
           .where(eq(schema.agentModelBindings.agent_id, agentId))
           .limit(1);
@@ -143,15 +157,20 @@ export class AgentRuntime {
         if (binding) {
           const newErrors = (binding.total_errors ?? 0) + 1;
           const newCalls = (binding.total_calls ?? 0) + 1;
-          const errorRate = newErrors / newCalls;
-          if (errorRate > 0.5 && newCalls >= 5) {
+          const retryMax = binding.retry_max ?? 3;
+          const consecutiveThreshold = retryMax + 1;
+          if (newErrors >= consecutiveThreshold * 2) {
+            updates.fault_state = "offline";
+            if (binding.fault_state !== "offline") updates.fault_since = now;
+          } else if (newErrors >= consecutiveThreshold) {
             updates.fault_state = "degraded";
-            updates.fault_since = now;
+            if (binding.fault_state === "ok") updates.fault_since = now;
           }
         }
       } else {
         updates.fault_state = "ok";
         updates.fault_since = null;
+        updates.total_errors = 0;
       }
       await this.deps.db
         .update(schema.agentModelBindings)

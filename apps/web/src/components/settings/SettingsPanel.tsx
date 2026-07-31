@@ -312,6 +312,8 @@ function AgentConfigCard({ agent, emoji, providers, saving, message, onSave }: {
     <div className="provider-card">
       <div className="provider-card-header">
         <span className="provider-card-name">{emoji} {agent.display_name}</span>
+        {agent.binding?.fault_state === "degraded" && <span className="gateway-msg-err">不稳定</span>}
+        {agent.binding?.fault_state === "offline" && <span className="gateway-msg-err">离线</span>}
       </div>
       <label className="gateway-label">
         API Provider

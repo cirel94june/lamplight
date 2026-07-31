@@ -108,15 +108,24 @@ async function ensureEnvProvider(
   baseUrl: string,
   apiKey: string,
 ): Promise<void> {
+  const { encrypt: enc } = await import("./crypto.js");
   const existing = await db
     .select()
     .from(schema.apiProviders)
     .where(eq(schema.apiProviders.id, id))
     .limit(1);
-  if (existing[0]) return;
 
-  const { encrypt: enc } = await import("./crypto.js");
   const now = new Date().toISOString();
+  if (existing[0]) {
+    await db.update(schema.apiProviders).set({
+      base_url: baseUrl,
+      api_key_encrypted: enc(apiKey),
+      is_active: 1,
+      updated_at: now,
+    }).where(eq(schema.apiProviders.id, id));
+    return;
+  }
+
   await db.insert(schema.apiProviders).values({
     id,
     provider_type: providerType,
@@ -134,8 +143,20 @@ async function autoBindUnboundAgents(db: LibSQLDatabase<typeof schema>): Promise
   const bindings = await db.select({ agent_id: schema.agentModelBindings.agent_id }).from(schema.agentModelBindings);
   const boundIds = new Set(bindings.map((b) => b.agent_id));
 
-  const envAnthropicExists = await db.select().from(schema.apiProviders).where(eq(schema.apiProviders.id, "env-anthropic")).limit(1);
-  if (!envAnthropicExists[0]) return;
+  const envProviders = await db.select().from(schema.apiProviders)
+    .where(eq(schema.apiProviders.id, "env-anthropic"))
+    .limit(1);
+  const envOpenai = await db.select().from(schema.apiProviders)
+    .where(eq(schema.apiProviders.id, "env-openai"))
+    .limit(1);
+
+  const hasAnthropic = envProviders.length > 0;
+  const hasOpenai = envOpenai.length > 0;
+  if (!hasAnthropic && !hasOpenai) return;
+
+  const fallbackProvider = hasAnthropic
+    ? { api_provider_id: "env-anthropic", provider_id: "anthropic", model_id: "claude-haiku-4-5" }
+    : { api_provider_id: "env-openai", provider_id: "openai", model_id: "gpt-4o-mini" };
 
   const now = new Date().toISOString();
   for (const agent of agents) {
@@ -143,9 +164,7 @@ async function autoBindUnboundAgents(db: LibSQLDatabase<typeof schema>): Promise
     await db.insert(schema.agentModelBindings).values({
       id: `env-bind-${agent.agent_id}`,
       agent_id: agent.agent_id,
-      api_provider_id: "env-anthropic",
-      provider_id: "anthropic",
-      model_id: "claude-haiku-4-5",
+      ...fallbackProvider,
       created_at: now,
       updated_at: now,
     });

@@ -50,34 +50,30 @@ export class GatewayService implements AIGateway {
       throw error;
     }
 
-    try {
-      const response = await provider.complete(request);
-      console.log(
-        `[gateway] ${request.provider_id}/${request.model_id} ` +
-          `in=${response.usage.input_tokens} out=${response.usage.output_tokens}`,
-      );
-      return response;
-    } catch (error) {
-      if (this.isRetryable(error)) {
+    const maxRetries = request.retry_max ?? 1;
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await provider.complete(request);
         console.log(
-          `[gateway] ${request.provider_id}/${request.model_id} failed, retrying…`,
+          `[gateway] ${request.provider_id}/${request.model_id} ` +
+            `in=${response.usage.input_tokens} out=${response.usage.output_tokens}`,
         );
-        try {
-          const response = await provider.complete(request);
+        return response;
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxRetries && this.isRetryable(error)) {
           console.log(
-            `[gateway] ${request.provider_id}/${request.model_id} retry OK ` +
-              `in=${response.usage.input_tokens} out=${response.usage.output_tokens}`,
+            `[gateway] ${request.provider_id}/${request.model_id} failed, retrying (${attempt + 1}/${maxRetries})…`,
           );
-          return response;
-        } catch (retryError) {
-          console.error(
-            `[gateway] ${request.provider_id}/${request.model_id} retry failed`,
-          );
-          throw retryError;
+          continue;
         }
+        break;
       }
-      throw error;
     }
+
+    throw lastError;
   }
 
   private isRetryable(error: unknown): boolean {

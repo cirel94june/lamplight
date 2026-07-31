@@ -284,6 +284,9 @@ settings.put("/agents/:agent_id/model-config", async (c) => {
         api_provider_id: body.api_provider_id,
         provider_id: body.provider_id,
         model_id: body.model_id,
+        fault_state: "ok",
+        fault_since: null,
+        total_errors: 0,
         updated_at: now,
       })
       .where(eq(schema.agentModelBindings.agent_id, agentId));

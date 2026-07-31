@@ -19,6 +19,7 @@ export const gatewayCompletionRequestSchema = z.object({
   max_tokens: z.number().int().positive().optional(),
   temperature: z.number().min(0).max(2).optional(),
   stop_sequences: z.array(z.string()).optional(),
+  retry_max: z.number().int().nonnegative().optional(),
 });
 export type GatewayCompletionRequest = z.infer<typeof gatewayCompletionRequestSchema>;
 

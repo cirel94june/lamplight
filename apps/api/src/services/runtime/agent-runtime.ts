@@ -87,6 +87,7 @@ export class AgentRuntime {
         messages,
         max_tokens: runtimeConfig?.max_response_tokens ?? undefined,
         temperature: runtimeConfig?.temperature ?? undefined,
+        retry_max: providerConfig.retry_max,
       });
 
       const timeoutMs = providerConfig.timeout_ms;

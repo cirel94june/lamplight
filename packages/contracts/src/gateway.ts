@@ -8,6 +8,8 @@ import { z } from "zod";
 export const gatewayMessageSchema = z.object({
   role: z.enum(["system", "user", "assistant"]),
   content: z.string(),
+  name: z.string().optional(),
+  sender_ai_id: z.string().optional(),
 });
 export type GatewayMessage = z.infer<typeof gatewayMessageSchema>;
 

@@ -52,6 +52,37 @@ export class AgentRuntime {
     return results.filter((r): r is AgentResponse => r !== null);
   }
 
+  async processEvaluationSequential(
+    evaluation: TurnEvaluation,
+    opts: {
+      scene_id?: string;
+      conversation_kind: string;
+    },
+    onAgentResponse?: (response: AgentResponse) => void,
+    onBeforeAgent?: (agentId: string) => void,
+  ): Promise<AgentResponse[]> {
+    if (evaluation.eligible_agent_ids.length === 0) return [];
+
+    const conv = await this.deps.conversationRepo.getConversation(
+      evaluation.conversation_id,
+    );
+    if (!conv) {
+      throw new Error(`Conversation not found: ${evaluation.conversation_id}`);
+    }
+
+    const results: AgentResponse[] = [];
+    for (const agentId of evaluation.eligible_agent_ids) {
+      onBeforeAgent?.(agentId);
+      const response = await this.generateResponse(agentId, evaluation, opts);
+      if (response) {
+        results.push(response);
+        onAgentResponse?.(response);
+      }
+    }
+
+    return results;
+  }
+
   private async generateResponse(
     agentId: string,
     evaluation: TurnEvaluation,

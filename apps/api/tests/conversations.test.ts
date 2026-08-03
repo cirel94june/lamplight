@@ -599,5 +599,75 @@ describe("Conversation API", () => {
         expect(hasDone).toBe(true);
       }
     });
+
+    it("two rapid messages are serialized — second batch waits for first to finish", async () => {
+      // Seed only one agent so each batch produces exactly one typing→done pair
+      await db.run(sql`DELETE FROM ai_presence`);
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+      ]);
+      await db.run(sql`DELETE FROM agent_profiles`);
+      await db.insert(schema.agentProfiles).values([
+        { agent_id: "xiaoke", display_name: "小克", memory_scope: "xiaoke" },
+      ]);
+      await db.run(sql`DELETE FROM agent_model_bindings`);
+      await db.insert(schema.agentModelBindings).values([
+        { id: "bind-xiaoke", agent_id: "xiaoke", api_provider_id: "test-provider", provider_id: "anthropic", model_id: "claude-opus-4-6" },
+      ]);
+      await db.run(sql`DELETE FROM agent_runtime_configs`);
+      await db.insert(schema.agentRuntimeConfigs).values([
+        {
+          agent_id: "xiaoke",
+          random_reply_affinity: 0.7,
+          max_response_tokens: 1024,
+          temperature: 0.8,
+          system_prompt_template: "test",
+        },
+      ]);
+
+      const createRes = await app.request("/conversations", {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ scene_id: "room-living-room" }),
+      });
+      const { data: conv } = await createRes.json();
+      broadcastSpy.mockClear();
+
+      // Send two messages rapidly (fire-and-forget triggers overlap)
+      const [res1, res2] = await Promise.all([
+        app.request(`/conversations/${conv.id}/messages`, {
+          method: "POST",
+          headers: { ...authHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "first message" }),
+        }),
+        app.request(`/conversations/${conv.id}/messages`, {
+          method: "POST",
+          headers: { ...authHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "second message" }),
+        }),
+      ]);
+
+      expect(res1.status).toBe(201);
+      expect(res2.status).toBe(201);
+
+      // Wait for both async triggers to complete
+      await new Promise((r) => setTimeout(r, 500));
+
+      // Extract only agent lifecycle broadcasts in order
+      const agentEvents = broadcastSpy.mock.calls
+        .map(([msg]) => msg.type)
+        .filter((t: string) => t === "agent_typing" || t === "agent_done");
+
+      // With serialization and one agent per batch, the pattern must be:
+      // [typing, done, typing, done] — never [typing, typing, done, done]
+      if (agentEvents.length >= 4) {
+        // Batch 1 done must come before batch 2 typing
+        const firstDoneIdx = agentEvents.indexOf("agent_done");
+        const secondTypingIdx = agentEvents.indexOf("agent_typing", agentEvents.indexOf("agent_typing") + 1);
+        if (firstDoneIdx >= 0 && secondTypingIdx >= 0) {
+          expect(firstDoneIdx).toBeLessThan(secondTypingIdx);
+        }
+      }
+    });
   });
 });

@@ -1017,4 +1017,231 @@ describe("Agent Runtime integration", () => {
       }
     });
   });
+
+  describe("验收场景：公共客厅顺序接话 — 蓝玻璃钥匙 7F3A", () => {
+    beforeEach(async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "jasper", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-sequential",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["jasper", "xiaoke"],
+        turn_policy: {
+          policy_id: "living-room-default",
+          triggers: {
+            on_user_message: "all_present",
+            on_agent_message: {
+              mention: true,
+              random: true,
+              cooldown_ms: 5000,
+              max_consecutive: 2,
+            },
+          },
+          reply_mode: "sequential",
+        },
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      await conversationRepo.createMessage({
+        id: "msg-user-key",
+        conversation_id: "conv-sequential",
+        conversation_kind: "house_chat",
+        sender_type: "user",
+        content: "@Jasper 你有没有蓝玻璃钥匙？",
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: new Date().toISOString(),
+      });
+    });
+
+    it("sequential: xiaoke's gateway INPUT contains Jasper's identity and content", async () => {
+      const seqGateway = {
+        calls: [] as GatewayCompletionRequest[],
+        complete: vi.fn().mockImplementation(async (req: GatewayCompletionRequest) => {
+          seqGateway.calls.push(req);
+          const isJasper = req.model_id === "gpt-4o";
+          return {
+            content: isJasper
+              ? "有的，编号 7F3A。"
+              : "Jasper 说的那把 7F3A 蓝玻璃钥匙我也见过。",
+            usage: { input_tokens: 10, output_tokens: 5 },
+            model_id: req.model_id,
+            provider_id: req.provider_id,
+            finish_reason: "end_turn",
+          } satisfies GatewayCompletionResponse;
+        }),
+      };
+
+      const seqRuntime = new AgentRuntime({
+        db,
+        gateway: seqGateway,
+        contextBuilder,
+        conversationRepo,
+      });
+
+      const evaluation = await turnEvaluator.evaluateUserMessage({
+        conversation_id: "conv-sequential",
+        message_id: "msg-user-key",
+        scene_id: "room-living-room",
+      });
+
+      expect(evaluation.eligible_agent_ids).toContain("jasper");
+      expect(evaluation.eligible_agent_ids).toContain("xiaoke");
+
+      const responses = await seqRuntime.processEvaluationSequential(
+        evaluation,
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+
+      expect(responses).toHaveLength(2);
+
+      // Gateway called twice (sequential — jasper first, then xiaoke)
+      expect(seqGateway.calls).toHaveLength(2);
+
+      // Find xiaoke's gateway call (anthropic provider)
+      const xiaokeCall = seqGateway.calls.find((c) => c.provider_id === "anthropic");
+      expect(xiaokeCall).toBeDefined();
+
+      // Xiaoke's gateway INPUT must contain Jasper's message with sender_ai_id
+      const jasperMsgInContext = xiaokeCall!.messages.find(
+        (m) => m.sender_ai_id === "jasper",
+      );
+      expect(jasperMsgInContext).toBeDefined();
+      expect(jasperMsgInContext!.content).toContain("7F3A");
+      expect(jasperMsgInContext!.name).toBe("Jasper");
+
+      // Jasper's message is mapped to role "user" with [DisplayName] prefix (other agent's message)
+      expect(jasperMsgInContext!.role).toBe("user");
+      expect(jasperMsgInContext!.content).toContain("[Jasper]");
+
+      // DB has correct messages
+      const allMessages = await conversationRepo.getRecentMessages("conv-sequential", 100);
+      expect(allMessages).toHaveLength(3); // 1 user + 2 AI
+      const aiMessages = allMessages.filter((m) => m.sender_type === "ai");
+      expect(aiMessages).toHaveLength(2);
+
+      // Both AI messages have sender_ai_id set
+      for (const msg of aiMessages) {
+        expect(msg.sender_ai_id).toBeDefined();
+      }
+      const jasperMsg = aiMessages.find((m) => m.sender_ai_id === "jasper");
+      expect(jasperMsg).toBeDefined();
+      expect(jasperMsg!.content).toContain("7F3A");
+    });
+
+    it("sequential: Jasper's gateway input does NOT contain xiaoke's message", async () => {
+      const seqGateway = {
+        calls: [] as GatewayCompletionRequest[],
+        complete: vi.fn().mockImplementation(async (req: GatewayCompletionRequest) => {
+          seqGateway.calls.push(req);
+          return {
+            content: req.model_id === "gpt-4o" ? "有的，编号 7F3A。" : "好的",
+            usage: { input_tokens: 10, output_tokens: 5 },
+            model_id: req.model_id,
+            provider_id: req.provider_id,
+            finish_reason: "end_turn",
+          } satisfies GatewayCompletionResponse;
+        }),
+      };
+
+      const seqRuntime = new AgentRuntime({
+        db,
+        gateway: seqGateway,
+        contextBuilder,
+        conversationRepo,
+      });
+
+      const evaluation = await turnEvaluator.evaluateUserMessage({
+        conversation_id: "conv-sequential",
+        message_id: "msg-user-key",
+        scene_id: "room-living-room",
+      });
+
+      await seqRuntime.processEvaluationSequential(
+        evaluation,
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+
+      // Jasper's call is first — should NOT contain xiaoke's response
+      const jasperCall = seqGateway.calls.find((c) => c.provider_id === "openai");
+      expect(jasperCall).toBeDefined();
+      const xiaokeInJasperContext = jasperCall!.messages.find(
+        (m) => m.sender_ai_id === "xiaoke",
+      );
+      expect(xiaokeInJasperContext).toBeUndefined();
+    });
+
+    it("concurrent mode: processEvaluation does NOT guarantee cross-visibility", async () => {
+      const responses = await runtime.processEvaluation(
+        await turnEvaluator.evaluateUserMessage({
+          conversation_id: "conv-sequential",
+          message_id: "msg-user-key",
+          scene_id: "room-living-room",
+        }),
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+
+      // Both still respond (concurrent mode still works)
+      expect(responses).toHaveLength(2);
+
+      // But in concurrent mode, neither agent sees the other's response in their gateway input
+      // (they read the timeline at the same time, before either has responded)
+      for (const call of gateway.calls) {
+        const otherAgentMsgs = call.messages.filter((m) => m.sender_ai_id);
+        expect(otherAgentMsgs).toHaveLength(0);
+      }
+    });
+
+    it("sequential: failed agent creates NO ghost message, next agent still runs", async () => {
+      let callIdx = 0;
+      const failGateway: AIGateway = {
+        complete: vi.fn().mockImplementation(async (req: GatewayCompletionRequest) => {
+          callIdx++;
+          if (callIdx === 1) throw new Error("jasper gateway down");
+          return {
+            content: "小克正常回复",
+            usage: { input_tokens: 10, output_tokens: 5 },
+            model_id: req.model_id,
+            provider_id: req.provider_id,
+            finish_reason: "end_turn",
+          } satisfies GatewayCompletionResponse;
+        }),
+      };
+
+      const failRuntime = new AgentRuntime({
+        db,
+        gateway: failGateway,
+        contextBuilder,
+        conversationRepo,
+      });
+
+      const evaluation = await turnEvaluator.evaluateUserMessage({
+        conversation_id: "conv-sequential",
+        message_id: "msg-user-key",
+        scene_id: "room-living-room",
+      });
+
+      const responses = await failRuntime.processEvaluationSequential(
+        evaluation,
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+
+      // Only xiaoke responded (jasper failed)
+      expect(responses).toHaveLength(1);
+      expect(responses[0].agent_id).toBe("xiaoke");
+
+      // DB: 1 user message + 1 AI message (no ghost from jasper)
+      const allMessages = await conversationRepo.getRecentMessages("conv-sequential", 100);
+      expect(allMessages).toHaveLength(2);
+      const aiMessages = allMessages.filter((m) => m.sender_type === "ai");
+      expect(aiMessages).toHaveLength(1);
+      expect(aiMessages[0].sender_ai_id).toBe("xiaoke");
+    });
+  });
 });

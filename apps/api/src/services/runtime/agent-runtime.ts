@@ -58,7 +58,7 @@ export class AgentRuntime {
       scene_id?: string;
       conversation_kind: string;
     },
-    onAgentResponse?: (response: AgentResponse) => void,
+    onAgentResponse?: (response: AgentResponse) => Promise<void> | void,
     onBeforeAgent?: (agentId: string) => void,
   ): Promise<AgentResponse[]> {
     if (evaluation.eligible_agent_ids.length === 0) return [];
@@ -76,7 +76,7 @@ export class AgentRuntime {
       const response = await this.generateResponse(agentId, evaluation, opts);
       if (response) {
         results.push(response);
-        onAgentResponse?.(response);
+        await onAgentResponse?.(response);
       }
     }
 

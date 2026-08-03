@@ -1243,5 +1243,54 @@ describe("Agent Runtime integration", () => {
       expect(aiMessages).toHaveLength(1);
       expect(aiMessages[0].sender_ai_id).toBe("xiaoke");
     });
+
+    it("same-timestamp messages preserve causal order via seq", async () => {
+      const sameTime = new Date().toISOString();
+
+      // Jasper's response has the same timestamp as the user message
+      const seqGateway = {
+        calls: [] as GatewayCompletionRequest[],
+        complete: vi.fn().mockImplementation(async (req: GatewayCompletionRequest) => {
+          seqGateway.calls.push(req);
+          return {
+            content: req.model_id === "gpt-4o" ? "有的，编号 7F3A。" : "好",
+            usage: { input_tokens: 10, output_tokens: 5 },
+            model_id: req.model_id,
+            provider_id: req.provider_id,
+            finish_reason: "end_turn",
+          } satisfies GatewayCompletionResponse;
+        }),
+      };
+
+      const seqRuntime = new AgentRuntime({
+        db,
+        gateway: seqGateway,
+        contextBuilder,
+        conversationRepo,
+      });
+
+      const evaluation = await turnEvaluator.evaluateUserMessage({
+        conversation_id: "conv-sequential",
+        message_id: "msg-user-key",
+        scene_id: "room-living-room",
+      });
+
+      await seqRuntime.processEvaluationSequential(
+        evaluation,
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+
+      const allMessages = await conversationRepo.getRecentMessages("conv-sequential", 100);
+
+      // Causal order must be: user question → jasper answer → xiaoke answer
+      expect(allMessages[0].sender_type).toBe("user");
+      expect(allMessages[0].content).toContain("蓝玻璃钥匙");
+      expect(allMessages[1].sender_ai_id).toBe("jasper");
+      expect(allMessages[2].sender_ai_id).toBe("xiaoke");
+
+      // seq must be monotonically increasing
+      expect(allMessages[0].seq).toBeLessThan(allMessages[1].seq);
+      expect(allMessages[1].seq).toBeLessThan(allMessages[2].seq);
+    });
   });
 });

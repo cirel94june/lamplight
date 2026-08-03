@@ -1,0 +1,1 @@
+ALTER TABLE `messages` ADD `seq` integer NOT NULL DEFAULT 0;

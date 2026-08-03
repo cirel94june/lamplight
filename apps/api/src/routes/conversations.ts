@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
-import { eq, and, desc, lt, or } from "drizzle-orm";
+import { eq, and, desc, lt } from "drizzle-orm";
 import { db, schema } from "../db/index.js";
 import { broadcast } from "../broadcast.js";
 import { ConversationRepository } from "../services/runtime/conversation-repository.js";
@@ -41,14 +41,14 @@ function withConversationLock(conversationId: string, fn: () => Promise<void>): 
   return next;
 }
 
-function encodeCursor(time: string, id: string): string {
-  return Buffer.from(JSON.stringify({ t: time, i: id })).toString("base64url");
+function encodeCursor(seq: number): string {
+  return Buffer.from(JSON.stringify({ s: seq })).toString("base64url");
 }
 
-function decodeCursor(cursor: string): { t: string; i: string } | null {
+function decodeCursor(cursor: string): { s: number } | null {
   try {
     const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString());
-    if (typeof parsed.t === "string" && typeof parsed.i === "string") {
+    if (typeof parsed.s === "number") {
       return parsed;
     }
     return null;
@@ -241,26 +241,18 @@ conversations.get("/:id/messages", async (c) => {
         400,
       );
     }
-    conditions.push(
-      or(
-        lt(schema.messages.created_at, cursor.t),
-        and(
-          eq(schema.messages.created_at, cursor.t),
-          lt(schema.messages.id, cursor.i),
-        ),
-      )!,
-    );
+    conditions.push(lt(schema.messages.seq, cursor.s));
   }
 
   const rows = await db
     .select()
     .from(schema.messages)
     .where(and(...conditions))
-    .orderBy(desc(schema.messages.created_at), desc(schema.messages.id))
+    .orderBy(desc(schema.messages.seq))
     .limit(limit);
 
   const nextCursor = rows.length === limit
-    ? encodeCursor(rows[rows.length - 1].created_at, rows[rows.length - 1].id)
+    ? encodeCursor(rows[rows.length - 1].seq)
     : null;
 
   return c.json({

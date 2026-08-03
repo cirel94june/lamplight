@@ -74,6 +74,36 @@ describe("turnPolicySchema", () => {
   it("rejects empty policy_id", () => {
     expect(turnPolicySchema.safeParse({ ...valid, policy_id: "" }).success).toBe(false);
   });
+
+  it("defaults reply_mode to sequential when omitted", () => {
+    const result = turnPolicySchema.safeParse(valid);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.reply_mode).toBe("sequential");
+    }
+  });
+
+  it("accepts concurrent reply_mode", () => {
+    const result = turnPolicySchema.safeParse({ ...valid, reply_mode: "concurrent" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.reply_mode).toBe("concurrent");
+    }
+  });
+
+  it("accepts sequential reply_mode", () => {
+    const result = turnPolicySchema.safeParse({ ...valid, reply_mode: "sequential" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.reply_mode).toBe("sequential");
+    }
+  });
+
+  it("rejects invalid reply_mode", () => {
+    expect(
+      turnPolicySchema.safeParse({ ...valid, reply_mode: "round_robin" }).success,
+    ).toBe(false);
+  });
 });
 
 describe("turnEvaluationSchema", () => {

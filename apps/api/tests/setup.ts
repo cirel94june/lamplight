@@ -99,6 +99,7 @@ beforeAll(async () => {
     id TEXT PRIMARY KEY NOT NULL,
     conversation_id TEXT NOT NULL,
     conversation_kind TEXT NOT NULL,
+    seq INTEGER NOT NULL DEFAULT 0,
     sender_type TEXT NOT NULL,
     sender_ai_id TEXT,
     content TEXT NOT NULL,

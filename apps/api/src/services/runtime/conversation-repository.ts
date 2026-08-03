@@ -1,4 +1,4 @@
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql, max } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import * as schema from "../../db/schema.js";
 
@@ -23,12 +23,17 @@ export class ConversationRepository {
       .select()
       .from(schema.messages)
       .where(eq(schema.messages.conversation_id, conversationId))
-      .orderBy(desc(schema.messages.created_at))
+      .orderBy(desc(schema.messages.seq))
       .limit(limit);
     return rows.reverse();
   }
 
   async createMessage(data: typeof schema.messages.$inferInsert) {
-    await this.db.insert(schema.messages).values(data);
+    const [{ maxSeq }] = await this.db
+      .select({ maxSeq: max(schema.messages.seq) })
+      .from(schema.messages)
+      .where(eq(schema.messages.conversation_id, data.conversation_id));
+    const nextSeq = (maxSeq ?? 0) + 1;
+    await this.db.insert(schema.messages).values({ ...data, seq: nextSeq });
   }
 }

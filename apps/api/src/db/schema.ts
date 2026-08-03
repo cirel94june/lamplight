@@ -119,6 +119,7 @@ export const messages = sqliteTable("messages", {
   id: text("id").primaryKey(),
   conversation_id: text("conversation_id").notNull(),
   conversation_kind: text("conversation_kind").notNull(),
+  seq: integer("seq").notNull().default(0),
   sender_type: text("sender_type").notNull(),
   sender_ai_id: text("sender_ai_id"),
   content: text("content").notNull(),

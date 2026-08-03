@@ -66,10 +66,22 @@ export class ContextBuilder {
     return messages;
   }
 
-  getProviderConfig(agentId: string) {
-    return this.getAgentProfile(agentId).then((p) =>
-      p ? { provider_id: p.provider_id, model_id: p.model_id } : null,
-    );
+  async getProviderConfig(agentId: string) {
+    const rows = await this.deps.db
+      .select()
+      .from(schema.agentModelBindings)
+      .where(eq(schema.agentModelBindings.agent_id, agentId))
+      .limit(1);
+    const binding = rows[0];
+    if (!binding) return null;
+    return {
+      provider_id: binding.provider_id,
+      model_id: binding.model_id,
+      api_provider_id: binding.api_provider_id,
+      timeout_ms: binding.timeout_ms ?? 30000,
+      retry_max: binding.retry_max ?? 3,
+      fault_state: binding.fault_state as "ok" | "degraded" | "offline",
+    };
   }
 
   getRuntimeConfig(agentId: string) {

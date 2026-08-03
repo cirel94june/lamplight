@@ -40,15 +40,49 @@ export const aiPresence = sqliteTable("ai_presence", {
   updated_at: text("updated_at").notNull(),
 });
 
+export const apiProviders = sqliteTable("api_providers", {
+  id: text("id").primaryKey(),
+  provider_type: text("provider_type").notNull(),
+  display_name: text("display_name").notNull(),
+  base_url: text("base_url").notNull(),
+  api_key_encrypted: text("api_key_encrypted").notNull(),
+  is_active: integer("is_active").notNull().default(1),
+  created_at: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+  updated_at: text("updated_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
 export const agentProfiles = sqliteTable("agent_profiles", {
   agent_id: text("agent_id").primaryKey(),
   display_name: text("display_name").notNull(),
-  provider_id: text("provider_id").notNull(),
-  model_id: text("model_id").notNull(),
   memory_scope: text("memory_scope").notNull(),
   tool_policy_id: text("tool_policy_id"),
   prompt_version: text("prompt_version"),
   created_at: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+export const agentModelBindings = sqliteTable("agent_model_bindings", {
+  id: text("id").primaryKey(),
+  agent_id: text("agent_id").notNull().unique(),
+  api_provider_id: text("api_provider_id").notNull(),
+  provider_id: text("provider_id").notNull(),
+  model_id: text("model_id").notNull(),
+  timeout_ms: integer("timeout_ms").default(30000),
+  retry_max: integer("retry_max").default(3),
+  fault_state: text("fault_state").notNull().default("ok"),
+  fault_since: text("fault_since"),
+  last_call_at: text("last_call_at"),
+  total_calls: integer("total_calls").notNull().default(0),
+  total_errors: integer("total_errors").notNull().default(0),
+  created_at: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+  updated_at: text("updated_at")
     .notNull()
     .default(sql`(datetime('now'))`),
 });

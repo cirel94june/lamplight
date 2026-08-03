@@ -17,9 +17,15 @@ vi.mock("../src/services/gateway/index.js", () => {
   };
   return {
     createGateway: () => mockGateway,
+    getGateway: () => mockGateway,
+    initGateway: () => mockGateway,
+    invalidateProvider: vi.fn(),
+    invalidateAllProviders: vi.fn(),
     GatewayService: vi.fn(() => mockGateway),
     AnthropicProvider: vi.fn(),
     OpenAIProvider: vi.fn(),
+    encrypt: vi.fn(),
+    decrypt: vi.fn(),
   };
 });
 
@@ -120,13 +126,12 @@ describe("WebSocket integration", () => {
     ]);
 
     await db.insert(schema.agentProfiles).values([
-      {
-        agent_id: "xiaoke",
-        display_name: "小克",
-        provider_id: "anthropic",
-        model_id: "claude-opus-4-6",
-        memory_scope: "xiaoke",
-      },
+      { agent_id: "xiaoke", display_name: "小克", memory_scope: "xiaoke" },
+    ]);
+
+    await db.run(sql`DELETE FROM agent_model_bindings`);
+    await db.insert(schema.agentModelBindings).values([
+      { id: "bind-xiaoke", agent_id: "xiaoke", api_provider_id: "test-provider", provider_id: "anthropic", model_id: "claude-opus-4-6" },
     ]);
 
     await db.insert(schema.agentRuntimeConfigs).values([

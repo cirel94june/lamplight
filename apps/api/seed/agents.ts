@@ -4,25 +4,21 @@ export const AGENT_PROFILES: AgentProfile[] = [
   {
     agent_id: "xiaoke",
     display_name: "小克",
-    model_config: { provider_id: "anthropic", model_id: "claude-opus-4-6" },
     memory_scope: "xiaoke",
   },
   {
     agent_id: "lucien",
     display_name: "Lucien",
-    model_config: { provider_id: "anthropic", model_id: "claude-opus-4-6" },
     memory_scope: "lucien",
   },
   {
     agent_id: "jasper",
     display_name: "Jasper",
-    model_config: { provider_id: "openai", model_id: "gpt-4o" },
     memory_scope: "jasper",
   },
   {
     agent_id: "therapist",
     display_name: "心理咨询师",
-    model_config: { provider_id: "anthropic", model_id: "claude-opus-4-6" },
     memory_scope: "therapist",
   },
 ];

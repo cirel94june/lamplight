@@ -44,8 +44,6 @@ for (const profile of AGENT_PROFILES) {
     .values({
       agent_id: profile.agent_id,
       display_name: profile.display_name,
-      provider_id: profile.model_config.provider_id,
-      model_id: profile.model_config.model_id,
       memory_scope: profile.memory_scope,
       tool_policy_id: profile.tool_policy_id ?? null,
       prompt_version: profile.prompt_version ?? null,
@@ -54,8 +52,6 @@ for (const profile of AGENT_PROFILES) {
       target: agentProfiles.agent_id,
       set: {
         display_name: profile.display_name,
-        provider_id: profile.model_config.provider_id,
-        model_id: profile.model_config.model_id,
         memory_scope: profile.memory_scope,
         tool_policy_id: profile.tool_policy_id ?? null,
         prompt_version: profile.prompt_version ?? null,

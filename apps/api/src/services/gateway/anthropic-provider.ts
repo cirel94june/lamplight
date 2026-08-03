@@ -9,8 +9,13 @@ import type {
 export class AnthropicProvider implements AIGateway {
   private client: Anthropic;
 
-  constructor(apiKey: string) {
-    this.client = new Anthropic({ apiKey, maxRetries: 0, timeout: 30_000 });
+  constructor(apiKey: string, baseURL: string) {
+    this.client = new Anthropic({
+      apiKey,
+      baseURL,
+      maxRetries: 0,
+      timeout: 30_000,
+    });
   }
 
   async complete(

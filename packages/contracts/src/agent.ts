@@ -6,25 +6,28 @@ import { z } from "zod";
  */
 
 export const modelConfigSchema = z.object({
-  /** provider 标识：anthropic / openai / google / deepseek / custom */
   provider_id: z.string().min(1),
-  /** 模型 ID：claude-opus-4-6 / gpt-4o / gemini-2.5-pro 等 */
   model_id: z.string().min(1),
+  api_provider_id: z.string().min(1),
 });
 export type ModelConfig = z.infer<typeof modelConfigSchema>;
 
-export const agentProfileSchema = z.object({
-  /** 稳定标识，全系统唯一：cloudy / lucien / jasper */
+export const agentModelBindingSchema = z.object({
   agent_id: z.string().min(1),
-  /** 展示名 */
+  api_provider_id: z.string().min(1),
+  provider_id: z.string().min(1),
+  model_id: z.string().min(1),
+  timeout_ms: z.number().int().positive().optional(),
+  retry_max: z.number().int().nonnegative().optional(),
+  fault_state: z.enum(["ok", "degraded", "offline"]).optional(),
+});
+export type AgentModelBinding = z.infer<typeof agentModelBindingSchema>;
+
+export const agentProfileSchema = z.object({
+  agent_id: z.string().min(1),
   display_name: z.string().min(1),
-  /** 当前使用的模型——可换，身份不变 */
-  model_config: modelConfigSchema,
-  /** Hub 侧记忆隔离范围（对应 Hub 的 memory scope / AI identity） */
   memory_scope: z.string().min(1),
-  /** 指向工具权限配置 */
   tool_policy_id: z.string().min(1).optional(),
-  /** 排查用：当前 prompt 模板版本号 */
   prompt_version: z.string().min(1).optional(),
 });
 export type AgentProfile = z.infer<typeof agentProfileSchema>;

@@ -114,4 +114,6 @@ beforeAll(async () => {
   )`);
 
   await db.run(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_active_scene ON conversations(scene_id) WHERE status = 'active'`);
+
+  await db.run(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_conv_seq ON messages(conversation_id, seq)`);
 });

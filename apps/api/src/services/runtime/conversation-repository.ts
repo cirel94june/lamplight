@@ -1,4 +1,4 @@
-import { eq, desc, sql, max } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import * as schema from "../../db/schema.js";
 
@@ -29,11 +29,26 @@ export class ConversationRepository {
   }
 
   async createMessage(data: typeof schema.messages.$inferInsert) {
-    const [{ maxSeq }] = await this.db
-      .select({ maxSeq: max(schema.messages.seq) })
-      .from(schema.messages)
-      .where(eq(schema.messages.conversation_id, data.conversation_id));
-    const nextSeq = (maxSeq ?? 0) + 1;
-    await this.db.insert(schema.messages).values({ ...data, seq: nextSeq });
+    const promptSnapshot = data.prompt_snapshot ? JSON.stringify(data.prompt_snapshot) : null;
+    await this.db.run(sql`
+      INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_world_id, context_session_id, context_branch_id, context_set_by, speech_mode, prompt_snapshot, created_at)
+      VALUES (
+        ${data.id},
+        ${data.conversation_id},
+        ${data.conversation_kind},
+        (SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE conversation_id = ${data.conversation_id}),
+        ${data.sender_type},
+        ${data.sender_ai_id ?? null},
+        ${data.content},
+        ${data.context_type},
+        ${data.context_world_id ?? null},
+        ${data.context_session_id ?? null},
+        ${data.context_branch_id ?? null},
+        ${data.context_set_by ?? "server"},
+        ${data.speech_mode ?? null},
+        ${promptSnapshot},
+        ${data.created_at}
+      )
+    `);
   }
 }

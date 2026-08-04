@@ -49,18 +49,30 @@ export class ContextBuilder {
       limit,
     );
 
+    const agentDisplayNames = await this.getAgentDisplayNames();
+
     const messages: GatewayMessage[] = [
       { role: "system", content: systemPrompt },
     ];
 
     for (const row of historyRows) {
-      const role =
-        row.sender_type === "user"
-          ? "user"
-          : row.sender_type === "ai"
-            ? "assistant"
-            : "user";
-      messages.push({ role, content: row.content });
+      if (row.sender_type === "user") {
+        messages.push({ role: "user", content: row.content });
+      } else if (row.sender_type === "ai" && row.sender_ai_id) {
+        if (row.sender_ai_id === request.agent_id) {
+          messages.push({ role: "assistant", content: row.content, sender_ai_id: row.sender_ai_id });
+        } else {
+          const displayName = agentDisplayNames.get(row.sender_ai_id) ?? row.sender_ai_id;
+          messages.push({
+            role: "user",
+            content: `[${displayName}]: ${row.content}`,
+            name: displayName,
+            sender_ai_id: row.sender_ai_id,
+          });
+        }
+      } else {
+        messages.push({ role: "user", content: row.content });
+      }
     }
 
     return messages;
@@ -106,6 +118,13 @@ export class ContextBuilder {
     result = result.replaceAll("{{prompt_weights}}", weightsText);
 
     return result;
+  }
+
+  private async getAgentDisplayNames(): Promise<Map<string, string>> {
+    const rows = await this.deps.db
+      .select({ agent_id: schema.agentProfiles.agent_id, display_name: schema.agentProfiles.display_name })
+      .from(schema.agentProfiles);
+    return new Map(rows.map((r) => [r.agent_id, r.display_name]));
   }
 
   private async getAgentProfile(agentId: string) {

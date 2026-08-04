@@ -36,6 +36,13 @@
       "when": 1785628800000,
       "tag": "0004_api_providers",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1785888000000,
+      "tag": "0005_message_seq",
+      "breakpoints": true
     }
   ]
 }

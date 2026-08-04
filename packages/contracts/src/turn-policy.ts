@@ -19,6 +19,7 @@ export type AgentChainTrigger = z.infer<typeof agentChainTriggerSchema>;
 export const turnPolicySchema = z.object({
   policy_id: z.string().min(1),
   triggers: agentChainTriggerSchema,
+  reply_mode: z.enum(["concurrent", "sequential"]).default("sequential"),
 });
 export type TurnPolicy = z.infer<typeof turnPolicySchema>;
 

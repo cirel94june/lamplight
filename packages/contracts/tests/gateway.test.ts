@@ -20,6 +20,48 @@ describe("gatewayMessageSchema", () => {
       gatewayMessageSchema.safeParse({ role: "tool", content: "hello" }).success,
     ).toBe(false);
   });
+
+  it("accepts name and sender_ai_id when non-empty", () => {
+    const result = gatewayMessageSchema.safeParse({
+      role: "user",
+      content: "[Jasper]: hello",
+      name: "Jasper",
+      sender_ai_id: "jasper",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts message without name and sender_ai_id", () => {
+    const result = gatewayMessageSchema.safeParse({
+      role: "user",
+      content: "hello",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.name).toBeUndefined();
+      expect(result.data.sender_ai_id).toBeUndefined();
+    }
+  });
+
+  it("rejects empty string name", () => {
+    expect(
+      gatewayMessageSchema.safeParse({
+        role: "user",
+        content: "hello",
+        name: "",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects empty string sender_ai_id", () => {
+    expect(
+      gatewayMessageSchema.safeParse({
+        role: "user",
+        content: "hello",
+        sender_ai_id: "",
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("gatewayCompletionRequestSchema", () => {

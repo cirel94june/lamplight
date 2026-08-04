@@ -24,6 +24,7 @@ const LIVING_ROOM_POLICY = {
       max_consecutive: 2,
     },
   },
+  reply_mode: "sequential" as const,
 };
 
 const STUDY_POLICY = {

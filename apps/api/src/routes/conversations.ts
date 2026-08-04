@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
-import { eq, and, desc, lt, or } from "drizzle-orm";
+import { eq, and, desc, lt } from "drizzle-orm";
 import { db, schema } from "../db/index.js";
 import { broadcast } from "../broadcast.js";
 import { ConversationRepository } from "../services/runtime/conversation-repository.js";
@@ -26,14 +26,29 @@ const runtime = new AgentRuntime({
 });
 const webAdapter = new LamplightWebAdapter();
 
-function encodeCursor(time: string, id: string): string {
-  return Buffer.from(JSON.stringify({ t: time, i: id })).toString("base64url");
+const conversationLocks = new Map<string, Promise<void>>();
+
+function withConversationLock(conversationId: string, fn: () => Promise<void>): Promise<void> {
+  const prev = conversationLocks.get(conversationId) ?? Promise.resolve();
+  const settled = prev.catch(() => {});
+  const next = settled.then(fn);
+  const cleanup = next.catch(() => {}).then(() => {
+    if (conversationLocks.get(conversationId) === cleanup) {
+      conversationLocks.delete(conversationId);
+    }
+  });
+  conversationLocks.set(conversationId, cleanup);
+  return next;
 }
 
-function decodeCursor(cursor: string): { t: string; i: string } | null {
+function encodeCursor(seq: number): string {
+  return Buffer.from(JSON.stringify({ s: seq })).toString("base64url");
+}
+
+function decodeCursor(cursor: string): { s: number } | null {
   try {
     const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString());
-    if (typeof parsed.t === "string" && typeof parsed.i === "string") {
+    if (typeof parsed.s === "number") {
       return parsed;
     }
     return null;
@@ -226,26 +241,18 @@ conversations.get("/:id/messages", async (c) => {
         400,
       );
     }
-    conditions.push(
-      or(
-        lt(schema.messages.created_at, cursor.t),
-        and(
-          eq(schema.messages.created_at, cursor.t),
-          lt(schema.messages.id, cursor.i),
-        ),
-      )!,
-    );
+    conditions.push(lt(schema.messages.seq, cursor.s));
   }
 
   const rows = await db
     .select()
     .from(schema.messages)
     .where(and(...conditions))
-    .orderBy(desc(schema.messages.created_at), desc(schema.messages.id))
+    .orderBy(desc(schema.messages.seq))
     .limit(limit);
 
   const nextCursor = rows.length === limit
-    ? encodeCursor(rows[rows.length - 1].created_at, rows[rows.length - 1].id)
+    ? encodeCursor(rows[rows.length - 1].seq)
     : null;
 
   return c.json({
@@ -344,15 +351,17 @@ conversations.post("/:id/messages", async (c) => {
     data: messageToResponse(userMsg),
   });
 
-  // Trigger AI responses asynchronously
-  triggerAgentResponses(convId, messageId, conv.scene_id ?? undefined, conv.kind, mentioned_agent_ids).catch((err) => {
+  // Trigger AI responses asynchronously, serialized per conversation
+  withConversationLock(convId, () =>
+    triggerAgentResponses(convId, messageId, conv.scene_id ?? undefined, conv.kind, mentioned_agent_ids),
+  ).catch((err) => {
     console.error("[conversations] agent response trigger failed:", err);
   });
 
   return c.json({ ok: true, data: messageToResponse(userMsg) }, 201);
 });
 
-async function executeEvaluation(
+async function executeEvaluationConcurrent(
   evaluation: { eligible_agent_ids: string[]; conversation_id: string },
   conversationId: string,
   sceneId: string | undefined,
@@ -376,44 +385,77 @@ async function executeEvaluation(
   const respondedAgentIds = new Set(responses.map((r) => r.agent_id));
 
   for (const response of responses) {
-    const msgRow = (await db
-      .select()
-      .from(schema.messages)
-      .where(eq(schema.messages.id, response.message_id))
-      .limit(1))[0];
-
-    if (msgRow) {
-      broadcast({
-        type: "new_message",
-        data: messageToResponse(msgRow),
-      });
-    }
-
-    broadcast({
-      type: "agent_done",
-      data: {
-        conversation_id: conversationId,
-        agent_id: response.agent_id,
-        message_id: response.message_id,
-      },
-    });
+    await broadcastAgentResponse(conversationId, response);
   }
 
-  // Broadcast agent_done for agents that failed (were typing but didn't respond)
   for (const agentId of typingAgents) {
     if (!respondedAgentIds.has(agentId)) {
       broadcast({
         type: "agent_done",
-        data: {
-          conversation_id: conversationId,
-          agent_id: agentId,
-          message_id: "",
-        },
+        data: { conversation_id: conversationId, agent_id: agentId, message_id: "" },
       });
     }
   }
 
   return responses;
+}
+
+async function executeEvaluationSequential(
+  evaluation: { eligible_agent_ids: string[]; conversation_id: string },
+  conversationId: string,
+  sceneId: string | undefined,
+  conversationKind: string,
+) {
+  if (evaluation.eligible_agent_ids.length === 0) return [];
+
+  const respondedAgentIds = new Set<string>();
+
+  const responses = await runtime.processEvaluationSequential(
+    evaluation as import("@lamplight/contracts").TurnEvaluation,
+    { scene_id: sceneId, conversation_kind: conversationKind },
+    async (response) => {
+      respondedAgentIds.add(response.agent_id);
+      await broadcastAgentResponse(conversationId, response);
+      broadcast({
+        type: "agent_done",
+        data: { conversation_id: conversationId, agent_id: response.agent_id, message_id: response.message_id },
+      });
+    },
+    (agentId) => {
+      broadcast({
+        type: "agent_typing",
+        data: { conversation_id: conversationId, agent_id: agentId },
+      });
+    },
+  );
+
+  for (const agentId of evaluation.eligible_agent_ids) {
+    if (!respondedAgentIds.has(agentId)) {
+      broadcast({
+        type: "agent_done",
+        data: { conversation_id: conversationId, agent_id: agentId, message_id: "" },
+      });
+    }
+  }
+
+  return responses;
+}
+
+async function broadcastAgentResponse(conversationId: string, response: { agent_id: string; message_id: string }) {
+  const msgRow = (await db
+    .select()
+    .from(schema.messages)
+    .where(eq(schema.messages.id, response.message_id))
+    .limit(1))[0];
+
+  if (msgRow) {
+    broadcast({ type: "new_message", data: messageToResponse(msgRow) });
+  }
+}
+
+function getReplyMode(conv: { turn_policy?: unknown }): "concurrent" | "sequential" {
+  const policy = conv.turn_policy as { reply_mode?: string } | null;
+  return policy?.reply_mode === "concurrent" ? "concurrent" : "sequential";
 }
 
 async function triggerAgentResponses(
@@ -423,6 +465,12 @@ async function triggerAgentResponses(
   conversationKind: string,
   mentionedAgentIds?: string[],
 ) {
+  const conv = await conversationRepo.getConversation(conversationId);
+  const replyMode = conv ? getReplyMode(conv) : "sequential";
+  const executeEvaluation = replyMode === "sequential"
+    ? executeEvaluationSequential
+    : executeEvaluationConcurrent;
+
   const evaluation = await turnEvaluator.evaluateUserMessage({
     conversation_id: conversationId,
     message_id: messageId,

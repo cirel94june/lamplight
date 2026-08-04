@@ -132,4 +132,7 @@ export const messages = sqliteTable("messages", {
   prompt_snapshot: text("prompt_snapshot", { mode: "json" })
     .$type<{ model: string; rendered_prompt: string; created_at: string } | null>(),
   created_at: text("created_at").notNull(),
-});
+}, (table) => [
+  uniqueIndex("idx_messages_conv_seq")
+    .on(table.conversation_id, table.seq),
+]);

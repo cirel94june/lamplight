@@ -61,6 +61,8 @@ export const agentProfiles = sqliteTable("agent_profiles", {
   memory_scope: text("memory_scope").notNull(),
   tool_policy_id: text("tool_policy_id"),
   prompt_version: text("prompt_version"),
+  aliases: text("aliases", { mode: "json" }).$type<string[]>(),
+  trigger_keywords: text("trigger_keywords", { mode: "json" }).$type<string[]>(),
   created_at: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),
@@ -131,6 +133,8 @@ export const messages = sqliteTable("messages", {
   speech_mode: text("speech_mode"),
   prompt_snapshot: text("prompt_snapshot", { mode: "json" })
     .$type<{ model: string; rendered_prompt: string; created_at: string } | null>(),
+  usage_input_tokens: integer("usage_input_tokens"),
+  usage_output_tokens: integer("usage_output_tokens"),
   created_at: text("created_at").notNull(),
 }, (table) => [
   uniqueIndex("idx_messages_conv_seq")

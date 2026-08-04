@@ -353,7 +353,7 @@ conversations.post("/:id/messages", async (c) => {
 
   // Trigger AI responses asynchronously, serialized per conversation
   withConversationLock(convId, () =>
-    triggerAgentResponses(convId, messageId, conv.scene_id ?? undefined, conv.kind, mentioned_agent_ids),
+    triggerAgentResponses(convId, messageId, conv.scene_id ?? undefined, conv.kind, mentioned_agent_ids, content.trim()),
   ).catch((err) => {
     console.error("[conversations] agent response trigger failed:", err);
   });
@@ -464,6 +464,7 @@ async function triggerAgentResponses(
   sceneId: string | undefined,
   conversationKind: string,
   mentionedAgentIds?: string[],
+  content?: string,
 ) {
   const conv = await conversationRepo.getConversation(conversationId);
   const replyMode = conv ? getReplyMode(conv) : "sequential";
@@ -476,6 +477,7 @@ async function triggerAgentResponses(
     message_id: messageId,
     scene_id: sceneId,
     mentioned_agent_ids: mentionedAgentIds,
+    content,
   });
 
   const responses = await executeEvaluation(

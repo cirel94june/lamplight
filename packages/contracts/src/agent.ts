@@ -29,6 +29,8 @@ export const agentProfileSchema = z.object({
   memory_scope: z.string().min(1),
   tool_policy_id: z.string().min(1).optional(),
   prompt_version: z.string().min(1).optional(),
+  aliases: z.array(z.string().min(1)).optional(),
+  trigger_keywords: z.array(z.string().min(1)).optional(),
 });
 export type AgentProfile = z.infer<typeof agentProfileSchema>;
 

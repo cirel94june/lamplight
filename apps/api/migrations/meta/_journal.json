@@ -43,6 +43,13 @@
       "when": 1785888000000,
       "tag": "0005_message_seq",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1786147200000,
+      "tag": "0006_agent_profile_triggers",
+      "breakpoints": true
     }
   ]
 }

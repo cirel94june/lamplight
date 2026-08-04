@@ -148,6 +148,8 @@ export class AgentRuntime {
           rendered_prompt: messages[0]?.content ?? "",
           created_at: now,
         },
+        usage_input_tokens: response.usage.input_tokens,
+        usage_output_tokens: response.usage.output_tokens,
         created_at: now,
       });
 

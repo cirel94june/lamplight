@@ -3,6 +3,7 @@ import {
   agentChainTriggerSchema,
   turnPolicySchema,
   turnEvaluationSchema,
+  selfChatLimitsSchema,
 } from "../src/index.js";
 
 describe("agentChainTriggerSchema", () => {
@@ -21,7 +22,7 @@ describe("agentChainTriggerSchema", () => {
   });
 
   it("accepts all on_user_message values", () => {
-    for (const v of ["all_present", "mentioned_only", "none"]) {
+    for (const v of ["all_present", "mentioned_only", "speaker_selection", "none"]) {
       expect(
         agentChainTriggerSchema.safeParse({ ...valid, on_user_message: v }).success,
       ).toBe(true);
@@ -102,6 +103,63 @@ describe("turnPolicySchema", () => {
   it("rejects invalid reply_mode", () => {
     expect(
       turnPolicySchema.safeParse({ ...valid, reply_mode: "round_robin" }).success,
+    ).toBe(false);
+  });
+
+  it("accepts speaker_selection on_user_message", () => {
+    const result = turnPolicySchema.safeParse({
+      ...valid,
+      triggers: { ...valid.triggers, on_user_message: "speaker_selection" },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts self_chat_limits", () => {
+    const result = turnPolicySchema.safeParse({
+      ...valid,
+      self_chat_limits: {
+        per_agent_max_per_minute: 4,
+        max_agent_rounds_without_user: 3,
+        max_total_messages: 50,
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("self_chat_limits are optional", () => {
+    const result = turnPolicySchema.safeParse(valid);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.self_chat_limits).toBeUndefined();
+    }
+  });
+});
+
+describe("selfChatLimitsSchema", () => {
+  it("provides defaults for all fields", () => {
+    const result = selfChatLimitsSchema.safeParse({});
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.per_agent_max_per_minute).toBe(4);
+      expect(result.data.max_agent_rounds_without_user).toBe(3);
+      expect(result.data.max_total_messages).toBe(50);
+    }
+  });
+
+  it("rejects non-positive per_agent_max_per_minute", () => {
+    expect(
+      selfChatLimitsSchema.safeParse({ per_agent_max_per_minute: 0 }).success,
+    ).toBe(false);
+  });
+
+  it("allows zero max_agent_rounds_without_user (no agent chaining)", () => {
+    const result = selfChatLimitsSchema.safeParse({ max_agent_rounds_without_user: 0 });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects non-positive max_total_messages", () => {
+    expect(
+      selfChatLimitsSchema.safeParse({ max_total_messages: 0 }).success,
     ).toBe(false);
   });
 });

@@ -31,7 +31,7 @@ export class ConversationRepository {
   async createMessage(data: typeof schema.messages.$inferInsert) {
     const promptSnapshot = data.prompt_snapshot ? JSON.stringify(data.prompt_snapshot) : null;
     await this.db.run(sql`
-      INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_world_id, context_session_id, context_branch_id, context_set_by, speech_mode, prompt_snapshot, created_at)
+      INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_world_id, context_session_id, context_branch_id, context_set_by, speech_mode, prompt_snapshot, usage_input_tokens, usage_output_tokens, created_at)
       VALUES (
         ${data.id},
         ${data.conversation_id},
@@ -47,6 +47,8 @@ export class ConversationRepository {
         ${data.context_set_by ?? "server"},
         ${data.speech_mode ?? null},
         ${promptSnapshot},
+        ${data.usage_input_tokens ?? null},
+        ${data.usage_output_tokens ?? null},
         ${data.created_at}
       )
     `);

@@ -54,6 +54,8 @@ beforeAll(async () => {
     memory_scope TEXT NOT NULL,
     tool_policy_id TEXT,
     prompt_version TEXT,
+    aliases TEXT,
+    trigger_keywords TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
 
@@ -110,6 +112,8 @@ beforeAll(async () => {
     context_set_by TEXT NOT NULL DEFAULT 'server',
     speech_mode TEXT,
     prompt_snapshot TEXT,
+    usage_input_tokens INTEGER,
+    usage_output_tokens INTEGER,
     created_at TEXT NOT NULL
   )`);
 

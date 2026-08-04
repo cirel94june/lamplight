@@ -28,7 +28,7 @@ export const turnPolicySchema = z.object({
   policy_id: z.string().min(1),
   triggers: agentChainTriggerSchema,
   reply_mode: z.enum(["concurrent", "sequential"]).default("sequential"),
-  self_chat_limits: selfChatLimitsSchema.optional(),
+  self_chat_limits: selfChatLimitsSchema.default({}),
 });
 export type TurnPolicy = z.infer<typeof turnPolicySchema>;
 

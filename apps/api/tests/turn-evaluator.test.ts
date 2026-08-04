@@ -544,3 +544,141 @@ describe("TurnEvaluator persistence", () => {
     expect(result.reason).toContain("max_total_tokens");
   });
 });
+
+describe("TurnEvaluator codex review fixes", () => {
+  beforeEach(async () => {
+    await seedSpeakerSelectionData();
+  });
+
+  it("@mention does NOT bypass total message budget", async () => {
+    const budgetPolicy = {
+      ...SPEAKER_SELECTION_POLICY,
+      self_chat_limits: {
+        per_agent_max_per_minute: 100,
+        max_agent_rounds_without_user: 100,
+        max_total_messages: 1,
+        max_total_tokens: 999999,
+      },
+    };
+    await db.run(sql`UPDATE conversations SET turn_policy = ${JSON.stringify(budgetPolicy)} WHERE id = 'conv-te-test'`);
+
+    const now = new Date().toISOString();
+    await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, content, context_type, context_set_by, created_at)
+      VALUES ('msg-user-1', 'conv-te-test', 'house_chat', 1, 'user', 'hi', 'out_of_world', 'server', ${now})`);
+
+    const evaluator = new TurnEvaluator({ db, rng: () => 0 });
+    const result = await evaluator.evaluateUserMessage({
+      conversation_id: "conv-te-test",
+      message_id: "msg-2",
+      scene_id: "room-te-living-room",
+      mentioned_agent_ids: ["te-xiaoke"],
+      content: "@小克",
+    });
+
+    expect(result.eligible_agent_ids).toEqual([]);
+    expect(result.reason).toContain("max_total_messages");
+  });
+
+  it("M>20 consecutive AI messages counted correctly (no truncation)", async () => {
+    const highMPolicy = {
+      ...SPEAKER_SELECTION_POLICY,
+      triggers: {
+        ...SPEAKER_SELECTION_POLICY.triggers,
+        on_agent_message: {
+          ...SPEAKER_SELECTION_POLICY.triggers.on_agent_message,
+          cooldown_ms: 0,
+          max_consecutive: 100,
+        },
+      },
+      self_chat_limits: {
+        per_agent_max_per_minute: 100,
+        max_agent_rounds_without_user: 25,
+        max_total_messages: 1000,
+        max_total_tokens: 999999,
+      },
+    };
+    await db.run(sql`UPDATE conversations SET turn_policy = ${JSON.stringify(highMPolicy)} WHERE id = 'conv-te-test'`);
+
+    const now = new Date().toISOString();
+    for (let i = 1; i <= 25; i++) {
+      const agentId = i % 2 === 0 ? "te-lucien" : "te-xiaoke";
+      await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, created_at)
+        VALUES (${`msg-chain-${i}`}, 'conv-te-test', 'house_chat', ${i}, 'ai', ${agentId}, 'msg', 'out_of_world', 'server', ${now})`);
+    }
+
+    const evaluator = new TurnEvaluator({ db, rng: () => 0 });
+    const result = await evaluator.evaluateAgentMessage({
+      conversation_id: "conv-te-test",
+      message_id: "msg-chain-25",
+      sender_agent_id: "te-xiaoke",
+      scene_id: "room-te-living-room",
+    });
+
+    expect(result.eligible_agent_ids).toEqual([]);
+    expect(result.reason).toContain("max_agent_rounds_without_user");
+  });
+
+  it("batch capped to remaining quota: 2 candidates but only 1 slot", async () => {
+    const tightPolicy = {
+      ...SPEAKER_SELECTION_POLICY,
+      self_chat_limits: {
+        per_agent_max_per_minute: 100,
+        max_agent_rounds_without_user: 3,
+        max_total_messages: 1000,
+        max_total_tokens: 999999,
+      },
+    };
+    await db.run(sql`UPDATE conversations SET turn_policy = ${JSON.stringify(tightPolicy)} WHERE id = 'conv-te-test'`);
+
+    const now = new Date().toISOString();
+    // 2 consecutive AI messages → 1 slot remaining (M=3, used=2)
+    await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, created_at)
+      VALUES ('msg-a1', 'conv-te-test', 'house_chat', 1, 'ai', 'te-xiaoke', 'hi', 'out_of_world', 'server', ${now})`);
+    await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, created_at)
+      VALUES ('msg-a2', 'conv-te-test', 'house_chat', 2, 'ai', 'te-lucien', 'hey', 'out_of_world', 'server', ${now})`);
+
+    // All 3 agents have affinity=1, RNG=0 → all would pass
+    await db.run(sql`UPDATE agent_runtime_configs SET random_reply_affinity = 1.0 WHERE agent_id IN ('te-xiaoke','te-lucien','te-jasper')`);
+
+    const evaluator = new TurnEvaluator({ db, rng: () => 0 });
+    const result = await evaluator.evaluateUserMessage({
+      conversation_id: "conv-te-test",
+      message_id: "msg-user",
+      scene_id: "room-te-living-room",
+      content: "hi everyone",
+    });
+
+    // Only 1 agent should be eligible despite all passing affinity roll
+    expect(result.eligible_agent_ids.length).toBe(1);
+  });
+
+  it("old policy without self_chat_limits gets safe defaults from schema", async () => {
+    const oldPolicy = {
+      policy_id: "old-style",
+      triggers: {
+        on_user_message: "speaker_selection",
+        on_agent_message: { mention: true, random: true, cooldown_ms: 0, max_consecutive: 2 },
+      },
+    };
+    await db.run(sql`UPDATE conversations SET turn_policy = ${JSON.stringify(oldPolicy)} WHERE id = 'conv-te-test'`);
+
+    const now = new Date().toISOString();
+    // Insert 3 consecutive AI messages (default max_agent_rounds_without_user=3)
+    for (let i = 1; i <= 3; i++) {
+      await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, created_at)
+        VALUES (${`msg-old-${i}`}, 'conv-te-test', 'house_chat', ${i}, 'ai', 'te-xiaoke', 'msg', 'out_of_world', 'server', ${now})`);
+    }
+
+    const evaluator = new TurnEvaluator({ db, rng: () => 0 });
+    const result = await evaluator.evaluateAgentMessage({
+      conversation_id: "conv-te-test",
+      message_id: "msg-old-3",
+      sender_agent_id: "te-xiaoke",
+      scene_id: "room-te-living-room",
+    });
+
+    // Old policy should get default self_chat_limits (M=3), so 3rd message should block
+    expect(result.eligible_agent_ids).toEqual([]);
+    expect(result.reason).toContain("self_chat_limit");
+  });
+});

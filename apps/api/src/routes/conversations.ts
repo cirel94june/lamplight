@@ -480,21 +480,29 @@ async function triggerAgentResponses(
     content,
   });
 
-  const responses = await executeEvaluation(
+  let pendingResponses = await executeEvaluation(
     evaluation, conversationId, sceneId, conversationKind,
   );
 
-  for (const response of responses) {
-    const chainEval = await turnEvaluator.evaluateAgentMessage({
-      conversation_id: conversationId,
-      message_id: response.message_id,
-      sender_agent_id: response.agent_id,
-      scene_id: sceneId,
-    });
+  const MAX_CHAIN_DEPTH = 50;
+  for (let depth = 0; depth < MAX_CHAIN_DEPTH && pendingResponses.length > 0; depth++) {
+    const nextResponses: typeof pendingResponses = [];
+    for (const response of pendingResponses) {
+      const chainEval = await turnEvaluator.evaluateAgentMessage({
+        conversation_id: conversationId,
+        message_id: response.message_id,
+        sender_agent_id: response.agent_id,
+        scene_id: sceneId,
+      });
 
-    await executeEvaluation(
-      chainEval, conversationId, sceneId, conversationKind,
-    );
+      if (chainEval.eligible_agent_ids.length === 0) continue;
+
+      const chainResponses = await executeEvaluation(
+        chainEval, conversationId, sceneId, conversationKind,
+      );
+      nextResponses.push(...chainResponses);
+    }
+    pendingResponses = nextResponses;
   }
 }
 

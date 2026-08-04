@@ -126,11 +126,15 @@ describe("turnPolicySchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("self_chat_limits are optional", () => {
+  it("self_chat_limits defaults to safe values when omitted", () => {
     const result = turnPolicySchema.safeParse(valid);
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.self_chat_limits).toBeUndefined();
+      expect(result.data.self_chat_limits).toEqual({
+        per_agent_max_per_minute: 4,
+        max_agent_rounds_without_user: 3,
+        max_total_messages: 50,
+      });
     }
   });
 });

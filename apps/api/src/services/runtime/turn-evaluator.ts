@@ -1,5 +1,6 @@
 import { eq, desc, and, gte, sql as drizzleSql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
+import { turnPolicySchema } from "@lamplight/contracts";
 import type { TurnPolicy, TurnEvaluation, SelfChatLimits } from "@lamplight/contracts";
 import * as schema from "../../db/schema.js";
 
@@ -58,6 +59,16 @@ export class TurnEvaluator {
     }
 
     // === speaker_selection pipeline ===
+
+    // Three-layer hard stops apply to ALL paths including mentions
+    const limits = policy.self_chat_limits;
+    if (limits) {
+      const blocked = await this.checkSelfChatLimits(opts.conversation_id, limits);
+      if (blocked) {
+        return this.result(opts, [], `self_chat_limit: ${blocked}`, now);
+      }
+    }
+
     const eligible = new Set<string>();
     const reasons: string[] = [];
 
@@ -73,13 +84,16 @@ export class TurnEvaluator {
     }
 
     if (mentionedSet.size > 0) {
-      // Mentions bypass affinity roll and cooldown, but NOT offline/presence (already filtered)
-      // and NOT three-layer hard stops (user messages reset the counter, so no check needed here)
       for (const id of mentionedSet) {
         eligible.add(id);
         reasons.push(`mentioned: ${id}`);
       }
-      return this.result(opts, [...eligible],
+      let result = [...eligible];
+      if (limits) {
+        const quota = await this.getRemainingRoundsQuota(opts.conversation_id, limits);
+        result = this.capToQuota(result, quota, reasons);
+      }
+      return this.result(opts, result,
         `speaker_selection: ${reasons.join("; ")}`, now);
     }
 
@@ -116,7 +130,13 @@ export class TurnEvaluator {
       return this.result(opts, [], "speaker_selection: no triggers matched, silence", now);
     }
 
-    return this.result(opts, [...eligible],
+    let finalEligible = [...eligible];
+    if (limits) {
+      const quota = await this.getRemainingRoundsQuota(opts.conversation_id, limits);
+      finalEligible = this.capToQuota(finalEligible, quota, reasons);
+    }
+
+    return this.result(opts, finalEligible,
       `speaker_selection: ${reasons.join("; ")}`, now);
   }
 
@@ -197,7 +217,15 @@ export class TurnEvaluator {
       }
     }
 
-    return this.result(opts, [...eligible],
+    let finalEligible = [...eligible];
+    if (policy.self_chat_limits) {
+      const quota = await this.getRemainingRoundsQuota(
+        opts.conversation_id, policy.self_chat_limits,
+      );
+      finalEligible = this.capToQuota(finalEligible, quota, []);
+    }
+
+    return this.result(opts, finalEligible,
       `on_agent_message: mention=${rules.mention} random=${rules.random}`, now);
   }
 
@@ -226,6 +254,22 @@ export class TurnEvaluator {
     }
 
     return null;
+  }
+
+  private async getRemainingRoundsQuota(
+    conversationId: string,
+    limits: SelfChatLimits,
+  ): Promise<number> {
+    const roundsSinceUser = await this.getConsecutiveAgentMessageCount(conversationId);
+    return Math.max(0, limits.max_agent_rounds_without_user - roundsSinceUser);
+  }
+
+  private capToQuota(eligible: string[], quota: number, reasons: string[]): string[] {
+    if (quota <= 0) return [];
+    if (eligible.length <= quota) return eligible;
+    const capped = eligible.slice(0, quota);
+    reasons.push(`capped to remaining quota ${quota}`);
+    return capped;
   }
 
   private async detectMentionsByContent(
@@ -389,23 +433,20 @@ export class TurnEvaluator {
       .where(eq(schema.conversations.id, conversationId))
       .limit(1);
 
-    if (conv[0]?.turn_policy) {
-      return conv[0].turn_policy as unknown as TurnPolicy;
-    }
+    const raw = conv[0]?.turn_policy
+      ?? (sceneId ? (await this.deps.db
+          .select({ default_turn_policy: schema.scenes.default_turn_policy })
+          .from(schema.scenes)
+          .where(eq(schema.scenes.scene_id, sceneId))
+          .limit(1)
+        )[0]?.default_turn_policy
+        : null);
 
-    if (sceneId) {
-      const scene = await this.deps.db
-        .select({ default_turn_policy: schema.scenes.default_turn_policy })
-        .from(schema.scenes)
-        .where(eq(schema.scenes.scene_id, sceneId))
-        .limit(1);
+    if (!raw) return null;
 
-      if (scene[0]?.default_turn_policy) {
-        return scene[0].default_turn_policy as unknown as TurnPolicy;
-      }
-    }
-
-    return null;
+    const parsed = turnPolicySchema.safeParse(raw);
+    if (!parsed.success) return null;
+    return parsed.data;
   }
 
   private async getPresentAgentIds(sceneId?: string): Promise<string[]> {
@@ -434,24 +475,17 @@ export class TurnEvaluator {
   private async getConsecutiveAgentMessageCount(
     conversationId: string,
   ): Promise<number> {
-    const recent = await this.deps.db
-      .select({
-        sender_type: schema.messages.sender_type,
-      })
-      .from(schema.messages)
-      .where(eq(schema.messages.conversation_id, conversationId))
-      .orderBy(desc(schema.messages.seq))
-      .limit(20);
-
-    let count = 0;
-    for (const row of recent) {
-      if (row.sender_type === "ai") {
-        count++;
-      } else {
-        break;
-      }
-    }
-    return count;
+    const rows = await this.deps.db.all(drizzleSql`
+      SELECT COUNT(*) as cnt FROM messages
+      WHERE conversation_id = ${conversationId}
+        AND seq > COALESCE(
+          (SELECT MAX(seq) FROM messages
+           WHERE conversation_id = ${conversationId} AND sender_type = 'user'),
+          0
+        )
+        AND sender_type = 'ai'
+    `);
+    return (rows[0] as any)?.cnt ?? 0;
   }
 
   private async getAgentAffinities(

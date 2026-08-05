@@ -362,7 +362,7 @@ conversations.post("/:id/messages", async (c) => {
 });
 
 async function executeEvaluationConcurrent(
-  evaluation: { eligible_agent_ids: string[]; conversation_id: string },
+  evaluation: { eligible_agent_ids: string[]; conversation_id: string; remaining_token_budget?: number },
   conversationId: string,
   sceneId: string | undefined,
   conversationKind: string,
@@ -378,7 +378,7 @@ async function executeEvaluationConcurrent(
   }
 
   const responses = await runtime.processEvaluation(
-    evaluation as import("@lamplight/contracts").TurnEvaluation,
+    evaluation as import("@lamplight/contracts").TurnEvaluation & { remaining_token_budget?: number },
     { scene_id: sceneId, conversation_kind: conversationKind },
   );
 
@@ -401,7 +401,7 @@ async function executeEvaluationConcurrent(
 }
 
 async function executeEvaluationSequential(
-  evaluation: { eligible_agent_ids: string[]; conversation_id: string },
+  evaluation: { eligible_agent_ids: string[]; conversation_id: string; remaining_token_budget?: number },
   conversationId: string,
   sceneId: string | undefined,
   conversationKind: string,
@@ -411,7 +411,7 @@ async function executeEvaluationSequential(
   const respondedAgentIds = new Set<string>();
 
   const responses = await runtime.processEvaluationSequential(
-    evaluation as import("@lamplight/contracts").TurnEvaluation,
+    evaluation as import("@lamplight/contracts").TurnEvaluation & { remaining_token_budget?: number },
     { scene_id: sceneId, conversation_kind: conversationKind },
     async (response) => {
       respondedAgentIds.add(response.agent_id);

@@ -408,7 +408,6 @@ export class TurnEvaluator {
   private async getTotalTokenUsage(conversationId: string): Promise<number> {
     const rows = await this.deps.db
       .select({
-        input: schema.messages.usage_input_tokens,
         output: schema.messages.usage_output_tokens,
       })
       .from(schema.messages)
@@ -416,7 +415,7 @@ export class TurnEvaluator {
 
     let total = 0;
     for (const row of rows) {
-      total += (row.input ?? 0) + (row.output ?? 0);
+      total += row.output ?? 0;
     }
     return total;
   }

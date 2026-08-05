@@ -356,11 +356,11 @@ describe("TurnEvaluator self-chat protection (three layers)", () => {
     await db.run(sql`UPDATE conversations SET turn_policy = ${JSON.stringify(tokenPolicy)} WHERE id = 'conv-te-test'`);
 
     const now = new Date().toISOString();
-    // Insert messages with usage that totals 600 tokens (over 500 budget)
+    // Insert messages with output totaling 600 tokens (over 500 budget; input is ignored)
     await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, usage_input_tokens, usage_output_tokens, created_at)
-      VALUES ('msg-1', 'conv-te-test', 'house_chat', 1, 'ai', 'te-xiaoke', 'hi', 'out_of_world', 'server', 200, 100, ${now})`);
+      VALUES ('msg-1', 'conv-te-test', 'house_chat', 1, 'ai', 'te-xiaoke', 'hi', 'out_of_world', 'server', 200, 300, ${now})`);
     await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, usage_input_tokens, usage_output_tokens, created_at)
-      VALUES ('msg-2', 'conv-te-test', 'house_chat', 2, 'ai', 'te-lucien', 'hey', 'out_of_world', 'server', 200, 100, ${now})`);
+      VALUES ('msg-2', 'conv-te-test', 'house_chat', 2, 'ai', 'te-lucien', 'hey', 'out_of_world', 'server', 200, 300, ${now})`);
 
     const evaluator = new TurnEvaluator({ db, rng: () => 0 });
     const result = await evaluator.evaluateAgentMessage({
@@ -529,9 +529,9 @@ describe("TurnEvaluator persistence", () => {
 
     const now = new Date().toISOString();
     await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, usage_input_tokens, usage_output_tokens, created_at)
-      VALUES ('msg-1', 'conv-te-test', 'house_chat', 1, 'ai', 'te-xiaoke', 'hi', 'out_of_world', 'server', 200, 150, ${now})`);
+      VALUES ('msg-1', 'conv-te-test', 'house_chat', 1, 'ai', 'te-xiaoke', 'hi', 'out_of_world', 'server', 200, 350, ${now})`);
 
-    // New evaluator (post-restart)
+    // New evaluator (post-restart) — output=350 > budget=300
     const evaluator = new TurnEvaluator({ db, rng: () => 0 });
     const result = await evaluator.evaluateAgentMessage({
       conversation_id: "conv-te-test",
@@ -751,5 +751,105 @@ describe("TurnEvaluator codex review fixes", () => {
 
     // Only 1 message slot remaining → at most 1 agent selected
     expect(result.eligible_agent_ids.length).toBeLessThanOrEqual(1);
+  });
+
+  it("token budget tracks output tokens only — budget=10, two agents with 5 output each exhausts it", async () => {
+    const policy = {
+      ...SPEAKER_SELECTION_POLICY,
+      self_chat_limits: {
+        per_agent_max_per_minute: 100,
+        max_agent_rounds_without_user: 100,
+        max_total_messages: 1000,
+        max_total_tokens: 10,
+      },
+    };
+    await db.run(sql`UPDATE conversations SET turn_policy = ${JSON.stringify(policy)} WHERE id = 'conv-te-test'`);
+
+    const now = new Date().toISOString();
+    // Insert messages with usage: 8 input + 5 output each (only output counts toward budget)
+    await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, created_at, usage_input_tokens, usage_output_tokens)
+      VALUES ('msg-tok-1', 'conv-te-test', 'house_chat', 1, 'ai', 'te-xiaoke', 'hi', 'out_of_world', 'server', ${now}, 8, 5)`);
+    await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, created_at, usage_input_tokens, usage_output_tokens)
+      VALUES ('msg-tok-2', 'conv-te-test', 'house_chat', 2, 'ai', 'te-lucien', 'hey', 'out_of_world', 'server', ${now}, 8, 5)`);
+
+    const evaluator = new TurnEvaluator({ db, rng: () => 0 });
+    const result = await evaluator.evaluateAgentMessage({
+      conversation_id: "conv-te-test",
+      message_id: "msg-tok-2",
+      sender_agent_id: "te-lucien",
+      scene_id: "room-te-living-room",
+    });
+
+    // 5+5=10 output tokens used, budget=10 → hard stop
+    expect(result.eligible_agent_ids).toEqual([]);
+    expect(result.reason).toContain("max_total_tokens");
+  });
+
+  it("token budget ignores input tokens — high input but low output stays under budget", async () => {
+    const policy = {
+      ...SPEAKER_SELECTION_POLICY,
+      self_chat_limits: {
+        per_agent_max_per_minute: 100,
+        max_agent_rounds_without_user: 100,
+        max_total_messages: 1000,
+        max_total_tokens: 10,
+      },
+    };
+    await db.run(sql`UPDATE conversations SET turn_policy = ${JSON.stringify(policy)} WHERE id = 'conv-te-test'`);
+
+    const now = new Date().toISOString();
+    // 100 input tokens but only 3 output — under budget
+    await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, content, context_type, context_set_by, created_at)
+      VALUES ('msg-usr-tok', 'conv-te-test', 'house_chat', 1, 'user', 'hi', 'out_of_world', 'server', ${now})`);
+    await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, created_at, usage_input_tokens, usage_output_tokens)
+      VALUES ('msg-tok-hi', 'conv-te-test', 'house_chat', 2, 'ai', 'te-xiaoke', 'hi', 'out_of_world', 'server', ${now}, 100, 3)`);
+
+    await db.run(sql`UPDATE agent_runtime_configs SET random_reply_affinity = 1.0 WHERE agent_id IN ('te-xiaoke','te-lucien','te-jasper')`);
+
+    const evaluator = new TurnEvaluator({ db, rng: () => 0 });
+    const result = await evaluator.evaluateUserMessage({
+      conversation_id: "conv-te-test",
+      message_id: "msg-usr-tok2",
+      scene_id: "room-te-living-room",
+      content: "大家好",
+    });
+
+    // 100 input + 3 output but budget only counts output (3 < 10) → agents eligible
+    expect(result.eligible_agent_ids.length).toBeGreaterThan(0);
+    // remaining_token_budget should be 10 - 3 = 7
+    expect(result.remaining_token_budget).toBe(7);
+  });
+
+  it("remaining_token_budget is returned for concurrent path consumption", async () => {
+    const policy = {
+      ...SPEAKER_SELECTION_POLICY,
+      self_chat_limits: {
+        per_agent_max_per_minute: 100,
+        max_agent_rounds_without_user: 100,
+        max_total_messages: 1000,
+        max_total_tokens: 20,
+      },
+    };
+    await db.run(sql`UPDATE conversations SET turn_policy = ${JSON.stringify(policy)} WHERE id = 'conv-te-test'`);
+
+    const now = new Date().toISOString();
+    await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, content, context_type, context_set_by, created_at)
+      VALUES ('msg-conc-usr', 'conv-te-test', 'house_chat', 1, 'user', 'hello', 'out_of_world', 'server', ${now})`);
+    await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, created_at, usage_input_tokens, usage_output_tokens)
+      VALUES ('msg-conc-ai', 'conv-te-test', 'house_chat', 2, 'ai', 'te-xiaoke', 'hi', 'out_of_world', 'server', ${now}, 50, 6)`);
+
+    await db.run(sql`UPDATE agent_runtime_configs SET random_reply_affinity = 1.0 WHERE agent_id IN ('te-xiaoke','te-lucien','te-jasper')`);
+
+    const evaluator = new TurnEvaluator({ db, rng: () => 0 });
+    const result = await evaluator.evaluateUserMessage({
+      conversation_id: "conv-te-test",
+      message_id: "msg-conc-usr2",
+      scene_id: "room-te-living-room",
+      content: "大家好",
+    });
+
+    // Budget=20, used output=6 → remaining=14
+    expect(result.remaining_token_budget).toBe(14);
+    expect(result.eligible_agent_ids.length).toBeGreaterThan(0);
   });
 });

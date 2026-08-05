@@ -28,7 +28,7 @@ export class AgentRuntime {
   constructor(private deps: AgentRuntimeDeps) {}
 
   async processEvaluation(
-    evaluation: TurnEvaluation,
+    evaluation: TurnEvaluation & { remaining_token_budget?: number },
     opts: {
       scene_id?: string;
       conversation_kind: string;
@@ -43,9 +43,13 @@ export class AgentRuntime {
       throw new Error(`Conversation not found: ${evaluation.conversation_id}`);
     }
 
+    const perAgentBudget = evaluation.remaining_token_budget != null
+      ? Math.floor(evaluation.remaining_token_budget / evaluation.eligible_agent_ids.length)
+      : undefined;
+
     const results = await Promise.all(
       evaluation.eligible_agent_ids.map((agentId) =>
-        this.generateResponse(agentId, evaluation, opts),
+        this.generateResponse(agentId, evaluation, opts, perAgentBudget),
       ),
     );
 
@@ -83,7 +87,7 @@ export class AgentRuntime {
       if (response) {
         results.push(response);
         if (tokenBudgetRemaining != null) {
-          tokenBudgetRemaining -= (response.usage.input_tokens + response.usage.output_tokens);
+          tokenBudgetRemaining -= response.usage.output_tokens;
         }
         await onAgentResponse?.(response);
       }

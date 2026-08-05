@@ -53,7 +53,7 @@ export class AgentRuntime {
   }
 
   async processEvaluationSequential(
-    evaluation: TurnEvaluation,
+    evaluation: TurnEvaluation & { remaining_token_budget?: number },
     opts: {
       scene_id?: string;
       conversation_kind: string;
@@ -71,11 +71,20 @@ export class AgentRuntime {
     }
 
     const results: AgentResponse[] = [];
+    let tokenBudgetRemaining = evaluation.remaining_token_budget;
+
     for (const agentId of evaluation.eligible_agent_ids) {
+      if (tokenBudgetRemaining != null && tokenBudgetRemaining <= 0) break;
+
       onBeforeAgent?.(agentId);
-      const response = await this.generateResponse(agentId, evaluation, opts);
+      const response = await this.generateResponse(
+        agentId, evaluation, opts, tokenBudgetRemaining,
+      );
       if (response) {
         results.push(response);
+        if (tokenBudgetRemaining != null) {
+          tokenBudgetRemaining -= (response.usage.input_tokens + response.usage.output_tokens);
+        }
         await onAgentResponse?.(response);
       }
     }
@@ -87,6 +96,7 @@ export class AgentRuntime {
     agentId: string,
     evaluation: TurnEvaluation,
     opts: { scene_id?: string; conversation_kind: string },
+    tokenBudgetRemaining?: number,
   ): Promise<AgentResponse | null> {
     try {
       const providerConfig =
@@ -111,12 +121,19 @@ export class AgentRuntime {
         conversation_kind: opts.conversation_kind as "house_chat",
       });
 
+      let maxTokens = runtimeConfig?.max_response_tokens ?? undefined;
+      if (tokenBudgetRemaining != null && tokenBudgetRemaining > 0) {
+        maxTokens = maxTokens
+          ? Math.min(maxTokens, tokenBudgetRemaining)
+          : tokenBudgetRemaining;
+      }
+
       const completionPromise = this.deps.gateway.complete({
         provider_id: providerConfig.provider_id,
         model_id: providerConfig.model_id,
         api_provider_id: providerConfig.api_provider_id,
         messages,
-        max_tokens: runtimeConfig?.max_response_tokens ?? undefined,
+        max_tokens: maxTokens,
         temperature: runtimeConfig?.temperature ?? undefined,
         retry_max: providerConfig.retry_max,
       });

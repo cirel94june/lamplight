@@ -681,4 +681,75 @@ describe("TurnEvaluator codex review fixes", () => {
     expect(result.eligible_agent_ids).toEqual([]);
     expect(result.reason).toContain("self_chat_limit");
   });
+
+  it("@mention blocked by per_agent_max_per_minute: xiaoke at limit=4, @小克 still rejected", async () => {
+    const policy = {
+      ...SPEAKER_SELECTION_POLICY,
+      self_chat_limits: {
+        per_agent_max_per_minute: 4,
+        max_agent_rounds_without_user: 100,
+        max_total_messages: 1000,
+        max_total_tokens: 999999,
+      },
+    };
+    await db.run(sql`UPDATE conversations SET turn_policy = ${JSON.stringify(policy)} WHERE id = 'conv-te-test'`);
+
+    const now = new Date().toISOString();
+    // Insert a user message first so consecutive-AI-count resets
+    await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, content, context_type, context_set_by, created_at)
+      VALUES ('msg-user-freq', 'conv-te-test', 'house_chat', 1, 'user', 'hi', 'out_of_world', 'server', ${now})`);
+    // xiaoke already spoke 4 times in the last minute (hitting the limit)
+    for (let i = 1; i <= 4; i++) {
+      await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, created_at)
+        VALUES (${`msg-freq-${i}`}, 'conv-te-test', 'house_chat', ${i + 1}, 'ai', 'te-xiaoke', 'msg', 'out_of_world', 'server', ${now})`);
+    }
+
+    const evaluator = new TurnEvaluator({ db, rng: () => 0 });
+    const result = await evaluator.evaluateUserMessage({
+      conversation_id: "conv-te-test",
+      message_id: "msg-user-mention",
+      scene_id: "room-te-living-room",
+      mentioned_agent_ids: ["te-xiaoke"],
+      content: "@小克 你好",
+    });
+
+    // xiaoke at per_agent_max_per_minute limit → must NOT be selected even via @mention
+    expect(result.eligible_agent_ids).not.toContain("te-xiaoke");
+  });
+
+  it("total messages remaining=1 caps batch to 1: 3 candidates but only 1 slot", async () => {
+    const policy = {
+      ...SPEAKER_SELECTION_POLICY,
+      self_chat_limits: {
+        per_agent_max_per_minute: 100,
+        max_agent_rounds_without_user: 100,
+        max_total_messages: 4,
+        max_total_tokens: 999999,
+      },
+    };
+    await db.run(sql`UPDATE conversations SET turn_policy = ${JSON.stringify(policy)} WHERE id = 'conv-te-test'`);
+
+    const now = new Date().toISOString();
+    // 3 existing messages → total=3, max=4, remaining=1
+    await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, content, context_type, context_set_by, created_at)
+      VALUES ('msg-tot-1', 'conv-te-test', 'house_chat', 1, 'user', 'hi', 'out_of_world', 'server', ${now})`);
+    await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, created_at)
+      VALUES ('msg-tot-2', 'conv-te-test', 'house_chat', 2, 'ai', 'te-xiaoke', 'hey', 'out_of_world', 'server', ${now})`);
+    await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, content, context_type, context_set_by, created_at)
+      VALUES ('msg-tot-3', 'conv-te-test', 'house_chat', 3, 'user', 'again', 'out_of_world', 'server', ${now})`);
+
+    // All 3 agents have affinity=1 so all pass affinity roll
+    await db.run(sql`UPDATE agent_runtime_configs SET random_reply_affinity = 1.0 WHERE agent_id IN ('te-xiaoke','te-lucien','te-jasper')`);
+
+    const evaluator = new TurnEvaluator({ db, rng: () => 0 });
+    const result = await evaluator.evaluateUserMessage({
+      conversation_id: "conv-te-test",
+      message_id: "msg-user-tot",
+      scene_id: "room-te-living-room",
+      content: "大家好",
+    });
+
+    // Only 1 message slot remaining → at most 1 agent selected
+    expect(result.eligible_agent_ids.length).toBeLessThanOrEqual(1);
+  });
 });

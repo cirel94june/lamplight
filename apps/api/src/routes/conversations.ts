@@ -484,8 +484,7 @@ async function triggerAgentResponses(
     evaluation, conversationId, sceneId, conversationKind,
   );
 
-  const MAX_CHAIN_DEPTH = 50;
-  for (let depth = 0; depth < MAX_CHAIN_DEPTH && pendingResponses.length > 0; depth++) {
+  while (pendingResponses.length > 0) {
     const nextResponses: typeof pendingResponses = [];
     for (const response of pendingResponses) {
       const chainEval = await turnEvaluator.evaluateAgentMessage({

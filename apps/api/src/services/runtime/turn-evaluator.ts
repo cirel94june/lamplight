@@ -9,6 +9,10 @@ export interface TurnEvaluatorDeps {
   rng?: () => number;
 }
 
+export interface TurnEvaluationWithBudget extends TurnEvaluation {
+  remaining_token_budget?: number;
+}
+
 export class TurnEvaluator {
   constructor(private deps: TurnEvaluatorDeps) {}
 
@@ -22,7 +26,7 @@ export class TurnEvaluator {
     scene_id?: string;
     mentioned_agent_ids?: string[];
     content?: string;
-  }): Promise<TurnEvaluation> {
+  }): Promise<TurnEvaluationWithBudget> {
     const now = new Date().toISOString();
     const policy = await this.resolvePolicy(opts.conversation_id, opts.scene_id);
 
@@ -46,22 +50,29 @@ export class TurnEvaluator {
     // Filter out offline agents
     const onlineResidents = await this.filterOnlineAgents(residentAgentIds);
 
+    const limits = policy.self_chat_limits;
+
     if (trigger === "mentioned_only") {
       const mentioned = opts.mentioned_agent_ids ?? [];
-      const eligible = onlineResidents.filter((id) => mentioned.includes(id));
+      let eligible = onlineResidents.filter((id) => mentioned.includes(id));
+      eligible = await this.applyUniversalLimits(opts.conversation_id, eligible, limits);
+      const tokenBudget = await this.computeRemainingTokenBudget(opts.conversation_id, limits);
       return this.result(opts, eligible,
-        `on_user_message: mentioned_only (${mentioned.length} mentioned)`, now);
+        `on_user_message: mentioned_only (${mentioned.length} mentioned)`, now, tokenBudget);
     }
 
     if (trigger === "all_present") {
-      return this.result(opts, onlineResidents,
-        `on_user_message: all_present (${onlineResidents.length} present)`, now);
+      let eligible = await this.applyUniversalLimits(
+        opts.conversation_id, onlineResidents, limits,
+      );
+      const tokenBudget = await this.computeRemainingTokenBudget(opts.conversation_id, limits);
+      return this.result(opts, eligible,
+        `on_user_message: all_present (${onlineResidents.length} present)`, now, tokenBudget);
     }
 
     // === speaker_selection pipeline ===
 
     // Three-layer hard stops apply to ALL paths including mentions
-    const limits = policy.self_chat_limits;
     if (limits) {
       const blocked = await this.checkSelfChatLimits(opts.conversation_id, limits);
       if (blocked) {
@@ -88,13 +99,12 @@ export class TurnEvaluator {
         eligible.add(id);
         reasons.push(`mentioned: ${id}`);
       }
-      let result = [...eligible];
-      if (limits) {
-        const quota = await this.getRemainingRoundsQuota(opts.conversation_id, limits);
-        result = this.capToQuota(result, quota, reasons);
-      }
-      return this.result(opts, result,
-        `speaker_selection: ${reasons.join("; ")}`, now);
+      const filtered = await this.applyUniversalLimits(
+        opts.conversation_id, [...eligible], limits,
+      );
+      const tokenBudget = await this.computeRemainingTokenBudget(opts.conversation_id, limits);
+      return this.result(opts, filtered,
+        `speaker_selection: ${reasons.join("; ")}`, now, tokenBudget);
     }
 
     // Layer 2: keyword triggers (soft priority — boosts affinity, doesn't force answer)
@@ -130,14 +140,13 @@ export class TurnEvaluator {
       return this.result(opts, [], "speaker_selection: no triggers matched, silence", now);
     }
 
-    let finalEligible = [...eligible];
-    if (limits) {
-      const quota = await this.getRemainingRoundsQuota(opts.conversation_id, limits);
-      finalEligible = this.capToQuota(finalEligible, quota, reasons);
-    }
+    const finalEligible = await this.applyUniversalLimits(
+      opts.conversation_id, [...eligible], limits,
+    );
 
+    const tokenBudget = await this.computeRemainingTokenBudget(opts.conversation_id, limits);
     return this.result(opts, finalEligible,
-      `speaker_selection: ${reasons.join("; ")}`, now);
+      `speaker_selection: ${reasons.join("; ")}`, now, tokenBudget);
   }
 
   async evaluateAgentMessage(opts: {
@@ -146,7 +155,7 @@ export class TurnEvaluator {
     sender_agent_id: string;
     scene_id?: string;
     mentioned_agent_ids?: string[];
-  }): Promise<TurnEvaluation> {
+  }): Promise<TurnEvaluationWithBudget> {
     const now = new Date().toISOString();
     const policy = await this.resolvePolicy(opts.conversation_id, opts.scene_id);
 
@@ -203,30 +212,15 @@ export class TurnEvaluator {
       }
     }
 
-    // Per-agent frequency limit
-    if (policy.self_chat_limits) {
-      const limit = policy.self_chat_limits.per_agent_max_per_minute;
-      const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
-      for (const id of [...eligible]) {
-        const count = await this.getAgentMessageCountSince(
-          opts.conversation_id, id, oneMinuteAgo,
-        );
-        if (count >= limit) {
-          eligible.delete(id);
-        }
-      }
-    }
+    const finalEligible = await this.applyUniversalLimits(
+      opts.conversation_id, [...eligible], policy.self_chat_limits,
+    );
 
-    let finalEligible = [...eligible];
-    if (policy.self_chat_limits) {
-      const quota = await this.getRemainingRoundsQuota(
-        opts.conversation_id, policy.self_chat_limits,
-      );
-      finalEligible = this.capToQuota(finalEligible, quota, []);
-    }
-
+    const tokenBudget = await this.computeRemainingTokenBudget(
+      opts.conversation_id, policy.self_chat_limits,
+    );
     return this.result(opts, finalEligible,
-      `on_agent_message: mention=${rules.mention} random=${rules.random}`, now);
+      `on_agent_message: mention=${rules.mention} random=${rules.random}`, now, tokenBudget);
   }
 
   private async checkSelfChatLimits(
@@ -256,20 +250,33 @@ export class TurnEvaluator {
     return null;
   }
 
-  private async getRemainingRoundsQuota(
+  private async applyUniversalLimits(
     conversationId: string,
-    limits: SelfChatLimits,
-  ): Promise<number> {
-    const roundsSinceUser = await this.getConsecutiveAgentMessageCount(conversationId);
-    return Math.max(0, limits.max_agent_rounds_without_user - roundsSinceUser);
-  }
+    eligible: string[],
+    limits?: SelfChatLimits,
+  ): Promise<string[]> {
+    if (!limits || eligible.length === 0) return eligible;
 
-  private capToQuota(eligible: string[], quota: number, reasons: string[]): string[] {
-    if (quota <= 0) return [];
-    if (eligible.length <= quota) return eligible;
-    const capped = eligible.slice(0, quota);
-    reasons.push(`capped to remaining quota ${quota}`);
-    return capped;
+    // Per-agent frequency filter
+    const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
+    const filtered: string[] = [];
+    for (const id of eligible) {
+      const count = await this.getAgentMessageCountSince(conversationId, id, oneMinuteAgo);
+      if (count < limits.per_agent_max_per_minute) {
+        filtered.push(id);
+      }
+    }
+
+    // Cap to minimum of remaining rounds and remaining total messages
+    const roundsSinceUser = await this.getConsecutiveAgentMessageCount(conversationId);
+    const roundsRemaining = Math.max(0, limits.max_agent_rounds_without_user - roundsSinceUser);
+
+    const totalCount = await this.getTotalMessageCount(conversationId);
+    const totalRemaining = Math.max(0, limits.max_total_messages - totalCount);
+
+    const quota = Math.min(roundsRemaining, totalRemaining);
+    if (filtered.length <= quota) return filtered;
+    return filtered.slice(0, quota);
   }
 
   private async detectMentionsByContent(
@@ -505,18 +512,29 @@ export class TurnEvaluator {
     return result;
   }
 
+  private async computeRemainingTokenBudget(
+    conversationId: string,
+    limits?: SelfChatLimits,
+  ): Promise<number | undefined> {
+    if (!limits?.max_total_tokens) return undefined;
+    const used = await this.getTotalTokenUsage(conversationId);
+    return Math.max(0, limits.max_total_tokens - used);
+  }
+
   private result(
     opts: { conversation_id: string; message_id?: string; trigger_message_id?: string },
     eligible: string[],
     reason: string,
     evaluated_at: string,
-  ): TurnEvaluation {
+    remaining_token_budget?: number,
+  ): TurnEvaluationWithBudget {
     return {
       conversation_id: opts.conversation_id,
       trigger_message_id: (opts as any).trigger_message_id ?? (opts as any).message_id ?? "",
       eligible_agent_ids: eligible,
       reason,
       evaluated_at,
+      remaining_token_budget,
     };
   }
 }

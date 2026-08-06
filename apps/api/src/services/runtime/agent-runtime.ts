@@ -252,14 +252,17 @@ export class AgentRuntime {
     }
   }
 
-  private estimateInputTokens(messages: Array<{ content: string }>): number {
-    let chars = 0;
+  estimateInputTokens(messages: Array<{ content: string }>): number {
+    let tokens = 0;
     for (const msg of messages) {
-      chars += msg.content.length;
+      tokens += msg.content.length;
+      // Per-message protocol overhead: role tag, separators, framing
+      tokens += 4;
     }
-    // ~2 chars/token is conservative for mixed CJK/ASCII; overestimates for
-    // pure ASCII (~4 c/t) but safe — better to undershoot output budget than
-    // overshoot total budget.
-    return Math.ceil(chars / 2);
+    // 1 char = 1 token is conservative for ASCII (~4 chars/token actual)
+    // but correct-to-generous for CJK (~1-1.5 chars/token actual).
+    // Overestimating input is safe: it caps output more aggressively,
+    // preventing total budget overshoot.
+    return tokens;
   }
 }

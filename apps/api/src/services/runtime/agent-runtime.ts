@@ -43,12 +43,19 @@ export class AgentRuntime {
       throw new Error(`Conversation not found: ${evaluation.conversation_id}`);
     }
 
-    const perAgentBudget = evaluation.remaining_token_budget != null
-      ? Math.ceil(evaluation.remaining_token_budget / evaluation.eligible_agent_ids.length)
-      : undefined;
+    let agentsToRun = evaluation.eligible_agent_ids;
+    let perAgentBudget: number | undefined;
+
+    if (evaluation.remaining_token_budget != null) {
+      const budget = evaluation.remaining_token_budget;
+      if (budget <= 0) return [];
+      perAgentBudget = Math.max(1, Math.floor(budget / agentsToRun.length));
+      const maxAgents = Math.floor(budget / perAgentBudget);
+      agentsToRun = agentsToRun.slice(0, maxAgents);
+    }
 
     const results = await Promise.all(
-      evaluation.eligible_agent_ids.map((agentId) =>
+      agentsToRun.map((agentId) =>
         this.generateResponse(agentId, evaluation, opts, perAgentBudget),
       ),
     );
@@ -127,11 +134,18 @@ export class AgentRuntime {
         conversation_kind: opts.conversation_kind as "house_chat",
       });
 
+      let outputBudget = tokenBudgetRemaining;
+      if (outputBudget != null) {
+        const estimatedInput = this.estimateInputTokens(messages);
+        outputBudget -= estimatedInput;
+        if (outputBudget <= 0) return null;
+      }
+
       let maxTokens = runtimeConfig?.max_response_tokens ?? undefined;
-      if (tokenBudgetRemaining != null && tokenBudgetRemaining > 0) {
+      if (outputBudget != null && outputBudget > 0) {
         maxTokens = maxTokens
-          ? Math.min(maxTokens, tokenBudgetRemaining)
-          : tokenBudgetRemaining;
+          ? Math.min(maxTokens, outputBudget)
+          : outputBudget;
       }
 
       const completionPromise = this.deps.gateway.complete({
@@ -236,5 +250,16 @@ export class AgentRuntime {
     } catch (err) {
       console.error(`[runtime] failed to update binding stats for ${agentId}:`, err);
     }
+  }
+
+  private estimateInputTokens(messages: Array<{ content: string }>): number {
+    let chars = 0;
+    for (const msg of messages) {
+      chars += msg.content.length;
+    }
+    // ~2 chars/token is conservative for mixed CJK/ASCII; overestimates for
+    // pure ASCII (~4 c/t) but safe — better to undershoot output budget than
+    // overshoot total budget.
+    return Math.ceil(chars / 2);
   }
 }

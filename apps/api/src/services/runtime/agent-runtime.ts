@@ -44,7 +44,7 @@ export class AgentRuntime {
     }
 
     const perAgentBudget = evaluation.remaining_token_budget != null
-      ? Math.floor(evaluation.remaining_token_budget / evaluation.eligible_agent_ids.length)
+      ? Math.ceil(evaluation.remaining_token_budget / evaluation.eligible_agent_ids.length)
       : undefined;
 
     const results = await Promise.all(
@@ -87,7 +87,7 @@ export class AgentRuntime {
       if (response) {
         results.push(response);
         if (tokenBudgetRemaining != null) {
-          tokenBudgetRemaining -= response.usage.output_tokens;
+          tokenBudgetRemaining -= (response.usage.input_tokens + response.usage.output_tokens);
         }
         await onAgentResponse?.(response);
       }
@@ -102,6 +102,8 @@ export class AgentRuntime {
     opts: { scene_id?: string; conversation_kind: string },
     tokenBudgetRemaining?: number,
   ): Promise<AgentResponse | null> {
+    if (tokenBudgetRemaining != null && tokenBudgetRemaining <= 0) return null;
+
     try {
       const providerConfig =
         await this.deps.contextBuilder.getProviderConfig(agentId);

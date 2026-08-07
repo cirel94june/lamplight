@@ -1293,4 +1293,574 @@ describe("Agent Runtime integration", () => {
       expect(allMessages[1].seq).toBeLessThan(allMessages[2].seq);
     });
   });
+
+  describe("token budget enforcement in runtime", () => {
+    it("sequential: budget deducts total (input+output), caps max_tokens", async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-budget-seq",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["xiaoke", "lucien"],
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      const budgetGateway = mockGateway();
+      const seqRuntime = new AgentRuntime({
+        db,
+        gateway: budgetGateway,
+        contextBuilder,
+        conversationRepo,
+      });
+      vi.spyOn(seqRuntime as any, "estimateInputTokens").mockReturnValue(0);
+
+      // Budget = 30; first agent uses 15 (10+5), leaving 15; second agent gets max_tokens=15
+      const responses = await seqRuntime.processEvaluationSequential(
+        {
+          conversation_id: "conv-budget-seq",
+          trigger_message_id: "msg-test",
+          eligible_agent_ids: ["xiaoke", "lucien"],
+          reason: "test",
+          evaluated_at: new Date().toISOString(),
+          remaining_token_budget: 30,
+        },
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+
+      expect(responses.length).toBe(2);
+      // First call: max_tokens = min(1024, 30) = 30
+      expect(budgetGateway.calls[0].max_tokens).toBe(30);
+      // Second call: max_tokens = min(1024, 15) = 15 (30 - 15 total = 15 remaining)
+      expect(budgetGateway.calls[1].max_tokens).toBe(15);
+    });
+
+    it("sequential: skips agent when budget exhausted after first call", async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-budget-exhaust",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["xiaoke", "lucien"],
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      const budgetGateway = mockGateway();
+      const seqRuntime = new AgentRuntime({
+        db,
+        gateway: budgetGateway,
+        contextBuilder,
+        conversationRepo,
+      });
+      vi.spyOn(seqRuntime as any, "estimateInputTokens").mockReturnValue(0);
+
+      // Budget = 10; first agent uses 15 (10 input + 5 output) → overshoots → budget = -5 → second skipped
+      const responses = await seqRuntime.processEvaluationSequential(
+        {
+          conversation_id: "conv-budget-exhaust",
+          trigger_message_id: "msg-test",
+          eligible_agent_ids: ["xiaoke", "lucien"],
+          reason: "test",
+          evaluated_at: new Date().toISOString(),
+          remaining_token_budget: 10,
+        },
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+
+      expect(responses.length).toBe(1);
+      expect(responses[0].agent_id).toBe("xiaoke");
+      expect(budgetGateway.calls.length).toBe(1);
+    });
+
+    it("concurrent: divides budget equally among agents", async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-budget-conc",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["xiaoke", "lucien"],
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      const budgetGateway = mockGateway();
+      const concRuntime = new AgentRuntime({
+        db,
+        gateway: budgetGateway,
+        contextBuilder,
+        conversationRepo,
+      });
+      vi.spyOn(concRuntime as any, "estimateInputTokens").mockReturnValue(0);
+
+      await concRuntime.processEvaluation(
+        {
+          conversation_id: "conv-budget-conc",
+          trigger_message_id: "msg-test",
+          eligible_agent_ids: ["xiaoke", "lucien"],
+          reason: "test",
+          evaluated_at: new Date().toISOString(),
+          remaining_token_budget: 10,
+        },
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+
+      // Budget 10 / 2 agents = floor(10/2) = 5 each; total 10 ≤ 10
+      expect(budgetGateway.calls.length).toBe(2);
+      for (const call of budgetGateway.calls) {
+        expect(call.max_tokens).toBe(5);
+      }
+    });
+
+    it("concurrent: budget=2 with 3 agents caps to 2 agents, total ≤ budget", async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "jasper", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-budget-ceil",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["xiaoke", "lucien", "jasper"],
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      const budgetGateway = mockGateway();
+      const concRuntime = new AgentRuntime({
+        db,
+        gateway: budgetGateway,
+        contextBuilder,
+        conversationRepo,
+      });
+      vi.spyOn(concRuntime as any, "estimateInputTokens").mockReturnValue(0);
+
+      await concRuntime.processEvaluation(
+        {
+          conversation_id: "conv-budget-ceil",
+          trigger_message_id: "msg-test",
+          eligible_agent_ids: ["xiaoke", "lucien", "jasper"],
+          reason: "test",
+          evaluated_at: new Date().toISOString(),
+          remaining_token_budget: 2,
+        },
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+
+      // budget=2, 3 candidates → perAgentBudget=max(1,floor(2/3))=1
+      // maxAgents=floor(2/1)=2 → only 2 agents run, each with max_tokens=1
+      // total output allocation = 2 ≤ budget
+      expect(budgetGateway.calls.length).toBe(2);
+      for (const call of budgetGateway.calls) {
+        expect(call.max_tokens).toBe(1);
+      }
+    });
+
+    it("concurrent: budget=0 produces no gateway calls", async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-budget-zero",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["xiaoke", "lucien"],
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      const budgetGateway = mockGateway();
+      const concRuntime = new AgentRuntime({
+        db,
+        gateway: budgetGateway,
+        contextBuilder,
+        conversationRepo,
+      });
+
+      const responses = await concRuntime.processEvaluation(
+        {
+          conversation_id: "conv-budget-zero",
+          trigger_message_id: "msg-test",
+          eligible_agent_ids: ["xiaoke", "lucien"],
+          reason: "test",
+          evaluated_at: new Date().toISOString(),
+          remaining_token_budget: 0,
+        },
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+
+      // Budget=0 → early return in processEvaluation → no calls
+      expect(responses.length).toBe(0);
+      expect(budgetGateway.calls.length).toBe(0);
+    });
+
+    it("input reservation: max_tokens reduced by estimated input tokens", async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-input-reserve",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["xiaoke"],
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      const budgetGateway = mockGateway();
+      const resRuntime = new AgentRuntime({
+        db,
+        gateway: budgetGateway,
+        contextBuilder,
+        conversationRepo,
+      });
+      vi.spyOn(resRuntime as any, "estimateInputTokens").mockReturnValue(20);
+
+      await resRuntime.processEvaluation(
+        {
+          conversation_id: "conv-input-reserve",
+          trigger_message_id: "msg-test",
+          eligible_agent_ids: ["xiaoke"],
+          reason: "test",
+          evaluated_at: new Date().toISOString(),
+          remaining_token_budget: 50,
+        },
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+
+      // perAgentBudget=50, estimatedInput=20 → outputBudget=30
+      expect(budgetGateway.calls.length).toBe(1);
+      expect(budgetGateway.calls[0].max_tokens).toBe(30);
+    });
+
+    it("input reservation: skips agent when estimated input exceeds budget", async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-input-skip",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["xiaoke"],
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      const budgetGateway = mockGateway();
+      const skipRuntime = new AgentRuntime({
+        db,
+        gateway: budgetGateway,
+        contextBuilder,
+        conversationRepo,
+      });
+      vi.spyOn(skipRuntime as any, "estimateInputTokens").mockReturnValue(60);
+
+      const responses = await skipRuntime.processEvaluation(
+        {
+          conversation_id: "conv-input-skip",
+          trigger_message_id: "msg-test",
+          eligible_agent_ids: ["xiaoke"],
+          reason: "test",
+          evaluated_at: new Date().toISOString(),
+          remaining_token_budget: 50,
+        },
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+
+      // estimatedInput=60 > budget=50 → outputBudget=-10 → agent skipped
+      expect(responses.length).toBe(0);
+      expect(budgetGateway.calls.length).toBe(0);
+    });
+
+    it("sequential: input reservation deducts from each agent budget", async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-seq-input-res",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["xiaoke", "lucien"],
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      const budgetGateway = mockGateway();
+      const seqRuntime = new AgentRuntime({
+        db,
+        gateway: budgetGateway,
+        contextBuilder,
+        conversationRepo,
+      });
+      vi.spyOn(seqRuntime as any, "estimateInputTokens").mockReturnValue(8);
+
+      // Budget=30; first agent: outputBudget=30-8=22, max_tokens=min(1024,22)=22
+      // gateway returns input=10+output=5=15 total; remaining=30-15=15
+      // second agent: outputBudget=15-8=7, max_tokens=min(1024,7)=7
+      const responses = await seqRuntime.processEvaluationSequential(
+        {
+          conversation_id: "conv-seq-input-res",
+          trigger_message_id: "msg-test",
+          eligible_agent_ids: ["xiaoke", "lucien"],
+          reason: "test",
+          evaluated_at: new Date().toISOString(),
+          remaining_token_budget: 30,
+        },
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+
+      expect(responses.length).toBe(2);
+      expect(budgetGateway.calls[0].max_tokens).toBe(22);
+      expect(budgetGateway.calls[1].max_tokens).toBe(7);
+    });
+  });
+
+  describe("estimateInputTokens (real estimator, not mocked)", () => {
+    it("100 Chinese chars → estimate ≥ 100 tokens", () => {
+      const msg = [{ content: "你".repeat(100) }];
+      const estimate = runtime.estimateInputTokens(msg);
+      // 100 chars × 1 + 4 overhead = 104
+      expect(estimate).toBe(104);
+      expect(estimate).toBeGreaterThanOrEqual(100);
+    });
+
+    it("pure ASCII gets 1:1 char-to-token (conservative overestimate)", () => {
+      const msg = [{ content: "Hello world, this is a test message." }];
+      const estimate = runtime.estimateInputTokens(msg);
+      // 36 chars + 4 overhead = 40; real tokenizer ~9 tokens
+      expect(estimate).toBe(40);
+    });
+
+    it("multiple messages accumulate per-message overhead", () => {
+      const msgs = [
+        { content: "system prompt" },
+        { content: "user message" },
+        { content: "assistant reply" },
+      ];
+      const estimate = runtime.estimateInputTokens(msgs);
+      // (13 + 12 + 15) chars + 3×4 overhead = 40 + 12 = 52
+      expect(estimate).toBe(52);
+    });
+
+    it("reviewer counterexample: 100 CJK chars, budget 100 → agent skipped", async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-cjk-budget",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["xiaoke"],
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      // Add a 100-char Chinese user message to the conversation
+      await conversationRepo.createMessage({
+        id: "msg-cjk-100",
+        conversation_id: "conv-cjk-budget",
+        conversation_kind: "house_chat",
+        sender_type: "user",
+        content: "你".repeat(100),
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: new Date().toISOString(),
+      });
+
+      const budgetGateway = mockGateway();
+      const cjkRuntime = new AgentRuntime({
+        db,
+        gateway: budgetGateway,
+        contextBuilder,
+        conversationRepo,
+      });
+
+      const responses = await cjkRuntime.processEvaluation(
+        {
+          conversation_id: "conv-cjk-budget",
+          trigger_message_id: "msg-cjk-100",
+          eligible_agent_ids: ["xiaoke"],
+          reason: "test",
+          evaluated_at: new Date().toISOString(),
+          remaining_token_budget: 100,
+        },
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+
+      // System prompt (~30 CJK chars) + user message (100 CJK chars) + overhead
+      // Estimate ≈ 130+ → exceeds budget 100 → agent skipped
+      expect(responses.length).toBe(0);
+      expect(budgetGateway.calls.length).toBe(0);
+    });
+
+    it("reviewer counterexample: 100 CJK chars, budget 200 → output capped conservatively", async () => {
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-cjk-enough",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["xiaoke"],
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      await conversationRepo.createMessage({
+        id: "msg-cjk-enough",
+        conversation_id: "conv-cjk-enough",
+        conversation_kind: "house_chat",
+        sender_type: "user",
+        content: "你".repeat(100),
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: new Date().toISOString(),
+      });
+
+      const budgetGateway = mockGateway();
+      const cjkRuntime = new AgentRuntime({
+        db,
+        gateway: budgetGateway,
+        contextBuilder,
+        conversationRepo,
+      });
+
+      await cjkRuntime.processEvaluation(
+        {
+          conversation_id: "conv-cjk-enough",
+          trigger_message_id: "msg-cjk-enough",
+          eligible_agent_ids: ["xiaoke"],
+          reason: "test",
+          evaluated_at: new Date().toISOString(),
+          remaining_token_budget: 200,
+        },
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+
+      // Budget 200, estimated input ~130+ → output budget ~70 or less
+      // max_tokens must be well under 200 to prevent total overshoot
+      expect(budgetGateway.calls.length).toBe(1);
+      expect(budgetGateway.calls[0].max_tokens).toBeLessThanOrEqual(70);
+      expect(budgetGateway.calls[0].max_tokens).toBeGreaterThan(0);
+    });
+  });
+
+  describe("end-to-end chain stop via evaluator", () => {
+    it("M=2 chain: user → agent1 → agent2 chains → 3rd agent blocked by rounds limit", async () => {
+      const chainPolicy = {
+        policy_id: "chain-test",
+        triggers: {
+          on_user_message: "all_present",
+          on_agent_message: {
+            mention: false,
+            random: true,
+            cooldown_ms: 0,
+            max_consecutive: 100,
+          },
+        },
+        self_chat_limits: {
+          per_agent_max_per_minute: 100,
+          max_agent_rounds_without_user: 2,
+          max_total_messages: 100,
+        },
+      };
+
+      await db.insert(schema.aiPresence).values([
+        { ai_id: "xiaoke", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+        { ai_id: "lucien", scene_id: "room-living-room", state: "active", updated_at: new Date().toISOString() },
+      ]);
+
+      await conversationRepo.createConversation({
+        id: "conv-chain-stop",
+        kind: "house_chat",
+        scene_id: "room-living-room",
+        participant_ai_ids: ["xiaoke", "lucien"],
+        turn_policy: chainPolicy as any,
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      // User message
+      await conversationRepo.createMessage({
+        id: "msg-chain-user",
+        conversation_id: "conv-chain-stop",
+        conversation_kind: "house_chat",
+        sender_type: "user",
+        content: "hello everyone",
+        context_type: "out_of_world",
+        context_set_by: "server",
+        created_at: new Date().toISOString(),
+      });
+
+      // Set both agents' affinity to 1 so they always want to speak
+      await db.run(sql`UPDATE agent_runtime_configs SET random_reply_affinity = 1.0 WHERE agent_id IN ('xiaoke','lucien')`);
+
+      const chainEvaluator = new TurnEvaluator({ db, rng: () => 0 });
+
+      // Step 1: evaluate user message → both agents eligible
+      const eval1 = await chainEvaluator.evaluateUserMessage({
+        conversation_id: "conv-chain-stop",
+        message_id: "msg-chain-user",
+        scene_id: "room-living-room",
+      });
+      expect(eval1.eligible_agent_ids.length).toBe(2);
+
+      // Simulate agent responses (runtime would do this)
+      const chainGateway = mockGateway();
+      const chainRuntime = new AgentRuntime({
+        db, gateway: chainGateway, contextBuilder, conversationRepo,
+      });
+
+      const responses1 = await chainRuntime.processEvaluationSequential(
+        eval1,
+        { scene_id: "room-living-room", conversation_kind: "house_chat" },
+      );
+      expect(responses1.length).toBe(2);
+
+      // Step 2: evaluate chain from last agent → M=2, already 2 AI messages → blocked
+      const eval2 = await chainEvaluator.evaluateAgentMessage({
+        conversation_id: "conv-chain-stop",
+        message_id: responses1[1].message_id,
+        sender_agent_id: responses1[1].agent_id,
+        scene_id: "room-living-room",
+      });
+
+      expect(eval2.eligible_agent_ids).toEqual([]);
+      expect(eval2.reason).toContain("self_chat_limit");
+      expect(eval2.reason).toContain("max_agent_rounds_without_user");
+    });
+  });
 });

@@ -28,7 +28,7 @@ export class AgentRuntime {
   constructor(private deps: AgentRuntimeDeps) {}
 
   async processEvaluation(
-    evaluation: TurnEvaluation,
+    evaluation: TurnEvaluation & { remaining_token_budget?: number },
     opts: {
       scene_id?: string;
       conversation_kind: string;
@@ -43,9 +43,20 @@ export class AgentRuntime {
       throw new Error(`Conversation not found: ${evaluation.conversation_id}`);
     }
 
+    let agentsToRun = evaluation.eligible_agent_ids;
+    let perAgentBudget: number | undefined;
+
+    if (evaluation.remaining_token_budget != null) {
+      const budget = evaluation.remaining_token_budget;
+      if (budget <= 0) return [];
+      perAgentBudget = Math.max(1, Math.floor(budget / agentsToRun.length));
+      const maxAgents = Math.floor(budget / perAgentBudget);
+      agentsToRun = agentsToRun.slice(0, maxAgents);
+    }
+
     const results = await Promise.all(
-      evaluation.eligible_agent_ids.map((agentId) =>
-        this.generateResponse(agentId, evaluation, opts),
+      agentsToRun.map((agentId) =>
+        this.generateResponse(agentId, evaluation, opts, perAgentBudget),
       ),
     );
 
@@ -53,7 +64,7 @@ export class AgentRuntime {
   }
 
   async processEvaluationSequential(
-    evaluation: TurnEvaluation,
+    evaluation: TurnEvaluation & { remaining_token_budget?: number },
     opts: {
       scene_id?: string;
       conversation_kind: string;
@@ -71,11 +82,20 @@ export class AgentRuntime {
     }
 
     const results: AgentResponse[] = [];
+    let tokenBudgetRemaining = evaluation.remaining_token_budget;
+
     for (const agentId of evaluation.eligible_agent_ids) {
+      if (tokenBudgetRemaining != null && tokenBudgetRemaining <= 0) break;
+
       onBeforeAgent?.(agentId);
-      const response = await this.generateResponse(agentId, evaluation, opts);
+      const response = await this.generateResponse(
+        agentId, evaluation, opts, tokenBudgetRemaining,
+      );
       if (response) {
         results.push(response);
+        if (tokenBudgetRemaining != null) {
+          tokenBudgetRemaining -= (response.usage.input_tokens + response.usage.output_tokens);
+        }
         await onAgentResponse?.(response);
       }
     }
@@ -87,7 +107,10 @@ export class AgentRuntime {
     agentId: string,
     evaluation: TurnEvaluation,
     opts: { scene_id?: string; conversation_kind: string },
+    tokenBudgetRemaining?: number,
   ): Promise<AgentResponse | null> {
+    if (tokenBudgetRemaining != null && tokenBudgetRemaining <= 0) return null;
+
     try {
       const providerConfig =
         await this.deps.contextBuilder.getProviderConfig(agentId);
@@ -111,12 +134,26 @@ export class AgentRuntime {
         conversation_kind: opts.conversation_kind as "house_chat",
       });
 
+      let outputBudget = tokenBudgetRemaining;
+      if (outputBudget != null) {
+        const estimatedInput = this.estimateInputTokens(messages);
+        outputBudget -= estimatedInput;
+        if (outputBudget <= 0) return null;
+      }
+
+      let maxTokens = runtimeConfig?.max_response_tokens ?? undefined;
+      if (outputBudget != null && outputBudget > 0) {
+        maxTokens = maxTokens
+          ? Math.min(maxTokens, outputBudget)
+          : outputBudget;
+      }
+
       const completionPromise = this.deps.gateway.complete({
         provider_id: providerConfig.provider_id,
         model_id: providerConfig.model_id,
         api_provider_id: providerConfig.api_provider_id,
         messages,
-        max_tokens: runtimeConfig?.max_response_tokens ?? undefined,
+        max_tokens: maxTokens,
         temperature: runtimeConfig?.temperature ?? undefined,
         retry_max: providerConfig.retry_max,
       });
@@ -148,6 +185,8 @@ export class AgentRuntime {
           rendered_prompt: messages[0]?.content ?? "",
           created_at: now,
         },
+        usage_input_tokens: response.usage.input_tokens,
+        usage_output_tokens: response.usage.output_tokens,
         created_at: now,
       });
 
@@ -211,5 +250,19 @@ export class AgentRuntime {
     } catch (err) {
       console.error(`[runtime] failed to update binding stats for ${agentId}:`, err);
     }
+  }
+
+  estimateInputTokens(messages: Array<{ content: string }>): number {
+    let tokens = 0;
+    for (const msg of messages) {
+      tokens += msg.content.length;
+      // Per-message protocol overhead: role tag, separators, framing
+      tokens += 4;
+    }
+    // 1 char = 1 token is conservative for ASCII (~4 chars/token actual)
+    // but correct-to-generous for CJK (~1-1.5 chars/token actual).
+    // Overestimating input is safe: it caps output more aggressively,
+    // preventing total budget overshoot.
+    return tokens;
   }
 }

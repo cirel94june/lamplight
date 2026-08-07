@@ -353,7 +353,7 @@ conversations.post("/:id/messages", async (c) => {
 
   // Trigger AI responses asynchronously, serialized per conversation
   withConversationLock(convId, () =>
-    triggerAgentResponses(convId, messageId, conv.scene_id ?? undefined, conv.kind, mentioned_agent_ids),
+    triggerAgentResponses(convId, messageId, conv.scene_id ?? undefined, conv.kind, mentioned_agent_ids, content.trim()),
   ).catch((err) => {
     console.error("[conversations] agent response trigger failed:", err);
   });
@@ -362,7 +362,7 @@ conversations.post("/:id/messages", async (c) => {
 });
 
 async function executeEvaluationConcurrent(
-  evaluation: { eligible_agent_ids: string[]; conversation_id: string },
+  evaluation: { eligible_agent_ids: string[]; conversation_id: string; remaining_token_budget?: number },
   conversationId: string,
   sceneId: string | undefined,
   conversationKind: string,
@@ -378,7 +378,7 @@ async function executeEvaluationConcurrent(
   }
 
   const responses = await runtime.processEvaluation(
-    evaluation as import("@lamplight/contracts").TurnEvaluation,
+    evaluation as import("@lamplight/contracts").TurnEvaluation & { remaining_token_budget?: number },
     { scene_id: sceneId, conversation_kind: conversationKind },
   );
 
@@ -401,7 +401,7 @@ async function executeEvaluationConcurrent(
 }
 
 async function executeEvaluationSequential(
-  evaluation: { eligible_agent_ids: string[]; conversation_id: string },
+  evaluation: { eligible_agent_ids: string[]; conversation_id: string; remaining_token_budget?: number },
   conversationId: string,
   sceneId: string | undefined,
   conversationKind: string,
@@ -411,7 +411,7 @@ async function executeEvaluationSequential(
   const respondedAgentIds = new Set<string>();
 
   const responses = await runtime.processEvaluationSequential(
-    evaluation as import("@lamplight/contracts").TurnEvaluation,
+    evaluation as import("@lamplight/contracts").TurnEvaluation & { remaining_token_budget?: number },
     { scene_id: sceneId, conversation_kind: conversationKind },
     async (response) => {
       respondedAgentIds.add(response.agent_id);
@@ -464,6 +464,7 @@ async function triggerAgentResponses(
   sceneId: string | undefined,
   conversationKind: string,
   mentionedAgentIds?: string[],
+  content?: string,
 ) {
   const conv = await conversationRepo.getConversation(conversationId);
   const replyMode = conv ? getReplyMode(conv) : "sequential";
@@ -476,23 +477,31 @@ async function triggerAgentResponses(
     message_id: messageId,
     scene_id: sceneId,
     mentioned_agent_ids: mentionedAgentIds,
+    content,
   });
 
-  const responses = await executeEvaluation(
+  let pendingResponses = await executeEvaluation(
     evaluation, conversationId, sceneId, conversationKind,
   );
 
-  for (const response of responses) {
-    const chainEval = await turnEvaluator.evaluateAgentMessage({
-      conversation_id: conversationId,
-      message_id: response.message_id,
-      sender_agent_id: response.agent_id,
-      scene_id: sceneId,
-    });
+  while (pendingResponses.length > 0) {
+    const nextResponses: typeof pendingResponses = [];
+    for (const response of pendingResponses) {
+      const chainEval = await turnEvaluator.evaluateAgentMessage({
+        conversation_id: conversationId,
+        message_id: response.message_id,
+        sender_agent_id: response.agent_id,
+        scene_id: sceneId,
+      });
 
-    await executeEvaluation(
-      chainEval, conversationId, sceneId, conversationKind,
-    );
+      if (chainEval.eligible_agent_ids.length === 0) continue;
+
+      const chainResponses = await executeEvaluation(
+        chainEval, conversationId, sceneId, conversationKind,
+      );
+      nextResponses.push(...chainResponses);
+    }
+    pendingResponses = nextResponses;
   }
 }
 

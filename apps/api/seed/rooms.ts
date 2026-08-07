@@ -16,7 +16,7 @@ const BEDROOM_POLICY = {
 const LIVING_ROOM_POLICY = {
   policy_id: "living-room-default",
   triggers: {
-    on_user_message: "all_present" as const,
+    on_user_message: "speaker_selection" as const,
     on_agent_message: {
       mention: true,
       random: true,
@@ -25,6 +25,12 @@ const LIVING_ROOM_POLICY = {
     },
   },
   reply_mode: "sequential" as const,
+  self_chat_limits: {
+    per_agent_max_per_minute: 4,
+    max_agent_rounds_without_user: 3,
+    max_total_messages: 50,
+    max_total_tokens: 100000,
+  },
 };
 
 const STUDY_POLICY = {

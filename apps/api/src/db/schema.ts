@@ -140,3 +140,36 @@ export const messages = sqliteTable("messages", {
   uniqueIndex("idx_messages_conv_seq")
     .on(table.conversation_id, table.seq),
 ]);
+
+export const maintenanceProposals = sqliteTable("maintenance_proposals", {
+  id: text("id").primaryKey(),
+  conversation_id: text("conversation_id").notNull(),
+  action: text("action").notNull(),
+  target_id: text("target_id"),
+  content: text("content").notNull(),
+  claim_type: text("claim_type").notNull(),
+  reason: text("reason").notNull(),
+  confidence: real("confidence").notNull(),
+  conflicts_with: text("conflicts_with", { mode: "json" }).$type<string[] | null>(),
+  status: text("status").notNull().default("pending"),
+  proposer_model: text("proposer_model").notNull(),
+  source_message_ids: text("source_message_ids", { mode: "json" }).$type<string[] | null>(),
+  evidence_excerpt: text("evidence_excerpt"),
+  created_at: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+export const maintenanceAudit = sqliteTable("maintenance_audit", {
+  id: text("id").primaryKey(),
+  proposal_id: text("proposal_id"),
+  action: text("action").notNull(),
+  target_id: text("target_id"),
+  decision_reason: text("decision_reason").notNull(),
+  actor_model_id: text("actor_model_id").notNull(),
+  actor_provider_id: text("actor_provider_id").notNull(),
+  auto_executed: integer("auto_executed").notNull().default(0),
+  created_at: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});

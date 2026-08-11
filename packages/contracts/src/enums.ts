@@ -41,6 +41,28 @@ export type ClaimType = z.infer<typeof claimTypeSchema>;
 export const contextTypeSchema = z.enum(["in_world", "out_of_world"]);
 export type ContextType = z.infer<typeof contextTypeSchema>;
 
+/** 维护模型的 9 种动作（continuity-layer-review-v2 §3）。 */
+export const maintenanceActionSchema = z.enum([
+  "create",
+  "update",
+  "supplement",
+  "correct",
+  "supersede",
+  "annotate",
+  "resolve_thread",
+  "reopen_thread",
+  "no_change",
+]);
+export type MaintenanceAction = z.infer<typeof maintenanceActionSchema>;
+
+/** 维护任务类型。 */
+export const maintenanceTaskTypeSchema = z.enum([
+  "digest",
+  "classify",
+  "conflict_detect",
+]);
+export type MaintenanceTaskType = z.infer<typeof maintenanceTaskTypeSchema>;
+
 /** 提案状态（MemoryProposal / ActionProposal 共用）。 */
 export const proposalStatusSchema = z.enum([
   "pending",

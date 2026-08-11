@@ -1,7 +1,7 @@
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
-import { scenes, agentProfiles, agentRuntimeConfigs } from "../src/db/schema.js";
+import { scenes, agentProfiles, agentRuntimeConfigs, agentModelBindings } from "../src/db/schema.js";
 import { ROOMS } from "./rooms.js";
 import { AGENT_PROFILES, AGENT_RUNTIME_CONFIGS } from "./agents.js";
 
@@ -80,4 +80,23 @@ for (const config of AGENT_RUNTIME_CONFIGS) {
     });
 }
 
-console.log(`[seed] upserted ${AGENT_PROFILES.length} agent profiles + runtime configs`);
+// Maintenance model independent binding (credential can reuse existing provider)
+const MAINTENANCE_PROVIDER_ID = process.env.MAINTENANCE_PROVIDER_ID ?? "test-provider";
+await db
+  .insert(agentModelBindings)
+  .values({
+    id: "bind-maintenance",
+    agent_id: "maintenance",
+    api_provider_id: MAINTENANCE_PROVIDER_ID,
+    provider_id: "anthropic",
+    model_id: process.env.MAINTENANCE_MODEL_ID ?? "claude-haiku-4-5",
+  })
+  .onConflictDoUpdate({
+    target: agentModelBindings.agent_id,
+    set: {
+      api_provider_id: MAINTENANCE_PROVIDER_ID,
+      model_id: process.env.MAINTENANCE_MODEL_ID ?? "claude-haiku-4-5",
+    },
+  });
+
+console.log(`[seed] upserted ${AGENT_PROFILES.length} agent profiles + runtime configs + maintenance binding`);

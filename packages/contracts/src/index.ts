@@ -12,3 +12,4 @@ export * from "./tool.js";
 export * from "./turn-policy.js";
 export * from "./gateway.js";
 export * from "./memory-adapter.js";
+export * from "./maintenance.js";

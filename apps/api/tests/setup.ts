@@ -117,6 +117,35 @@ beforeAll(async () => {
     created_at TEXT NOT NULL
   )`);
 
+  await db.run(sql`CREATE TABLE IF NOT EXISTS maintenance_proposals (
+    id TEXT PRIMARY KEY NOT NULL,
+    conversation_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target_id TEXT,
+    content TEXT NOT NULL,
+    claim_type TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    conflicts_with TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    proposer_model TEXT NOT NULL,
+    source_message_ids TEXT,
+    evidence_excerpt TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+
+  await db.run(sql`CREATE TABLE IF NOT EXISTS maintenance_audit (
+    id TEXT PRIMARY KEY NOT NULL,
+    proposal_id TEXT,
+    action TEXT NOT NULL,
+    target_id TEXT,
+    decision_reason TEXT NOT NULL,
+    actor_model_id TEXT NOT NULL,
+    actor_provider_id TEXT NOT NULL,
+    auto_executed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+
   await db.run(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_active_scene ON conversations(scene_id) WHERE status = 'active'`);
 
   await db.run(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_conv_seq ON messages(conversation_id, seq)`);

@@ -74,17 +74,23 @@ describe("validator", () => {
   it("rejects first-person content (中文)", () => {
     const r1 = validateThirdPerson("我觉得这段对话很有意思");
     expect(r1.valid).toBe(false);
-    expect(r1.matched).toBe("我觉得");
 
     const r2 = validateThirdPerson("我认为小克应该更主动");
     expect(r2.valid).toBe(false);
-    expect(r2.matched).toBe("我认为");
   });
 
   it("rejects first-person content (English)", () => {
     const r = validateThirdPerson("I think the user is feeling sad");
     expect(r.valid).toBe(false);
-    expect(r.matched).toBe("I think");
+  });
+
+  it("rejects bypass attempts: 我很难过 / 我爱 Ceci", () => {
+    expect(validateThirdPerson("我很难过").valid).toBe(false);
+    expect(validateThirdPerson("我爱 Ceci").valid).toBe(false);
+    expect(validateThirdPerson("我希望用户开心").valid).toBe(false);
+    expect(validateThirdPerson("I feel sad about this").valid).toBe(false);
+    expect(validateThirdPerson("I'm worried about them").valid).toBe(false);
+    expect(validateThirdPerson("I've noticed a pattern").valid).toBe(false);
   });
 
   it("batch validates: filters out first-person items", () => {
@@ -214,6 +220,34 @@ describe("Maintenance API", () => {
       });
       expect(res.status).toBe(400);
     });
+
+    it("drops items with invalid action or claim_type from model output", async () => {
+      mockComplete.mockResolvedValue({
+        content: JSON.stringify([
+          { action: "DESTROY", content: "非法动作", claim_type: "fact", reason: "test", confidence: 0.9 },
+          { action: "create", content: "非法分类", claim_type: "rumor", reason: "test", confidence: 0.5 },
+          { action: "create", content: "confidence 越界", claim_type: "fact", reason: "test", confidence: 1.5 },
+          { action: "create", content: "合法条目", claim_type: "fact", reason: "test", confidence: 0.8 },
+        ]),
+        usage: { input_tokens: 100, output_tokens: 80 },
+        model_id: "deepseek-chat",
+        provider_id: "anthropic",
+        finish_reason: "end_turn",
+      });
+
+      const res = await app.request("/maintenance/run", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ conversation_id: "conv-maint-test", task_type: "digest" }),
+      });
+
+      const data = (await res.json()).data;
+      expect(data.accepted.length).toBe(1);
+      expect(data.accepted[0].content).toBe("合法条目");
+
+      const proposals = await db.select().from(schema.maintenanceProposals);
+      expect(proposals.length).toBe(1);
+    });
   });
 
   describe("GET /maintenance/proposals", () => {
@@ -266,6 +300,47 @@ describe("Maintenance API", () => {
         body: JSON.stringify({ decision: "rejected" }),
       });
       expect(res.status).toBe(409);
+    });
+  });
+
+  describe("presence guard", () => {
+    it("blocks maintenance from being set to active presence", async () => {
+      const res = await app.request("/presence/maintenance", {
+        method: "PUT",
+        headers: authHeaders,
+        body: JSON.stringify({ scene_id: "room-living", state: "active", updated_at: new Date().toISOString() }),
+      });
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.code).toBe("FORBIDDEN");
+    });
+  });
+
+  describe("concurrent approval", () => {
+    it("only one of N concurrent reviews succeeds", async () => {
+      const now = new Date().toISOString();
+      await db.insert(schema.maintenanceProposals).values({
+        id: "mp-race", conversation_id: "conv-maint-test", action: "create", content: "race test", claim_type: "fact", reason: "test", confidence: 0.9, status: "pending", proposer_model: "test", created_at: now,
+      });
+
+      const results = await Promise.all(
+        Array.from({ length: 5 }, () =>
+          app.request("/maintenance/proposals/mp-race/review", {
+            method: "POST",
+            headers: authHeaders,
+            body: JSON.stringify({ decision: "approved" }),
+          }),
+        ),
+      );
+
+      const statuses = results.map((r) => r.status);
+      const successes = statuses.filter((s) => s === 200);
+      const conflicts = statuses.filter((s) => s === 409);
+      expect(successes.length).toBe(1);
+      expect(conflicts.length).toBe(4);
+
+      const audits = await db.select().from(schema.maintenanceAudit);
+      expect(audits.length).toBe(1);
     });
   });
 

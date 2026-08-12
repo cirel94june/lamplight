@@ -1,4 +1,4 @@
-import { eq, desc, and, gte, sql as drizzleSql } from "drizzle-orm";
+import { eq, ne, desc, and, gte, sql as drizzleSql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import { turnPolicySchema } from "@lamplight/contracts";
 import type { TurnPolicy, TurnEvaluation, SelfChatLimits } from "@lamplight/contracts";
@@ -465,6 +465,7 @@ export class TurnEvaluator {
         and(
           eq(schema.aiPresence.scene_id, sceneId),
           eq(schema.aiPresence.state, "active"),
+          ne(schema.aiPresence.ai_id, "maintenance"),
         ),
       );
     return rows.map((r) => r.ai_id);

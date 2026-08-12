@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
+import { maintenanceActionSchema, claimTypeSchema } from "@lamplight/contracts";
 import type { AIGateway, MaintenanceTask } from "@lamplight/contracts";
 import * as schema from "../../db/schema.js";
 import { ConversationRepository } from "../runtime/conversation-repository.js";
@@ -175,14 +176,15 @@ export class MaintenanceRunner {
       const parsed = JSON.parse(jsonMatch[0]);
       if (!Array.isArray(parsed)) return [];
       return parsed.filter(
-        (item: unknown): item is RawProposalItem =>
-          typeof item === "object" &&
-          item !== null &&
-          "action" in item &&
-          "content" in item &&
-          "claim_type" in item &&
-          "reason" in item &&
-          "confidence" in item,
+        (item: unknown): item is RawProposalItem => {
+          if (typeof item !== "object" || item === null) return false;
+          const obj = item as Record<string, unknown>;
+          if (!("action" in obj && "content" in obj && "claim_type" in obj && "reason" in obj && "confidence" in obj)) return false;
+          if (!maintenanceActionSchema.safeParse(obj.action).success) return false;
+          if (!claimTypeSchema.safeParse(obj.claim_type).success) return false;
+          if (typeof obj.confidence !== "number" || obj.confidence < 0 || obj.confidence > 1) return false;
+          return true;
+        },
       );
     } catch {
       return [];

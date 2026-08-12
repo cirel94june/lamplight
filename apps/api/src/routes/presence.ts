@@ -53,6 +53,13 @@ presence.put("/:ai_id", async (c) => {
       400,
     );
   }
+  if (ai_id === "maintenance") {
+    return c.json(
+      { ok: false, error: { code: "FORBIDDEN", message: "maintenance agent cannot have presence" } },
+      403,
+    );
+  }
+
   const input = { ...(body as Record<string, unknown>), ai_id };
   const parsed = presenceSchema.safeParse(input);
   if (!parsed.success) {

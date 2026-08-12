@@ -77,32 +77,36 @@ maintenance.post("/proposals/:id/review", async (c) => {
     return c.json({ ok: false, error: "decision must be 'approved' or 'rejected'" }, 400);
   }
 
-  const existing = await db
+  const now = new Date().toISOString();
+
+  const updateResult = await db.run(
+    sql`UPDATE maintenance_proposals SET status = ${body.decision} WHERE id = ${proposalId} AND status = 'pending'`,
+  );
+
+  if (updateResult.rowsAffected === 0) {
+    const existing = await db
+      .select({ status: schema.maintenanceProposals.status })
+      .from(schema.maintenanceProposals)
+      .where(eq(schema.maintenanceProposals.id, proposalId))
+      .limit(1);
+
+    if (existing.length === 0) {
+      return c.json({ ok: false, error: "Proposal not found" }, 404);
+    }
+    return c.json({ ok: false, error: `Proposal already ${existing[0].status}` }, 409);
+  }
+
+  const reviewed = await db
     .select()
     .from(schema.maintenanceProposals)
     .where(eq(schema.maintenanceProposals.id, proposalId))
     .limit(1);
 
-  if (existing.length === 0) {
-    return c.json({ ok: false, error: "Proposal not found" }, 404);
-  }
-
-  if (existing[0].status !== "pending") {
-    return c.json({ ok: false, error: `Proposal already ${existing[0].status}` }, 409);
-  }
-
-  const now = new Date().toISOString();
-
-  await db
-    .update(schema.maintenanceProposals)
-    .set({ status: body.decision })
-    .where(eq(schema.maintenanceProposals.id, proposalId));
-
   await db.insert(schema.maintenanceAudit).values({
     id: `ma_${randomUUID()}`,
     proposal_id: proposalId,
-    action: existing[0].action,
-    target_id: existing[0].target_id,
+    action: reviewed[0].action,
+    target_id: reviewed[0].target_id,
     decision_reason: body.reason ?? `User ${body.decision}`,
     actor_model_id: "user",
     actor_provider_id: "user",

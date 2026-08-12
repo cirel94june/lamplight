@@ -78,6 +78,7 @@ maintenance.post("/proposals/:id/review", async (c) => {
   }
 
   const now = new Date().toISOString();
+  const auditId = `ma_${randomUUID()}`;
 
   const updateResult = await db.run(
     sql`UPDATE maintenance_proposals SET status = ${body.decision} WHERE id = ${proposalId} AND status = 'pending'`,
@@ -103,7 +104,7 @@ maintenance.post("/proposals/:id/review", async (c) => {
     .limit(1);
 
   await db.insert(schema.maintenanceAudit).values({
-    id: `ma_${randomUUID()}`,
+    id: auditId,
     proposal_id: proposalId,
     action: reviewed[0].action,
     target_id: reviewed[0].target_id,

@@ -179,7 +179,10 @@ export class MaintenanceRunner {
         (item: unknown): item is RawProposalItem => {
           if (typeof item !== "object" || item === null) return false;
           const obj = item as Record<string, unknown>;
-          if (!("action" in obj && "content" in obj && "claim_type" in obj && "reason" in obj && "confidence" in obj)) return false;
+          if (typeof obj.content !== "string" || obj.content.length === 0) return false;
+          if (typeof obj.reason !== "string" || obj.reason.length === 0) return false;
+          if (typeof obj.action !== "string") return false;
+          if (typeof obj.claim_type !== "string") return false;
           if (!maintenanceActionSchema.safeParse(obj.action).success) return false;
           if (!claimTypeSchema.safeParse(obj.claim_type).success) return false;
           if (typeof obj.confidence !== "number" || obj.confidence < 0 || obj.confidence > 1) return false;

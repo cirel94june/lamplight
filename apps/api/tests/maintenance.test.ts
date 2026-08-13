@@ -94,10 +94,22 @@ describe("validator", () => {
     expect(validateThirdPerson("I've noticed a pattern").valid).toBe(false);
   });
 
-  it("allows legitimate compound words containing 我: 自我/忘我/我们", () => {
+  it("allows legitimate compound words containing 我: 自我/忘我/无我/舍我", () => {
     expect(validateThirdPerson("用户有很强的自我意识").valid).toBe(true);
     expect(validateThirdPerson("小克忘我地投入工作").valid).toBe(true);
-    expect(validateThirdPerson("我们观察到用户的变化").valid).toBe(true);
+    expect(validateThirdPerson("无我境界").valid).toBe(true);
+    expect(validateThirdPerson("舍我其谁").valid).toBe(true);
+  });
+
+  it("rejects 我们 — maintenance model must not use first-person plural", () => {
+    expect(validateThirdPerson("我们认为用户状态良好").valid).toBe(false);
+    expect(validateThirdPerson("我们观察到用户的变化").valid).toBe(false);
+  });
+
+  it("rejects lowercase English first-person (i think, i feel)", () => {
+    expect(validateThirdPerson("i think the user is sad").valid).toBe(false);
+    expect(validateThirdPerson("i feel this is important").valid).toBe(false);
+    expect(validateThirdPerson("i've noticed a pattern").valid).toBe(false);
   });
 
   it("batch validates: filters out first-person items", () => {
@@ -228,6 +240,31 @@ describe("Maintenance API", () => {
       expect(res.status).toBe(400);
     });
 
+    it("drops items with wrong-type optional fields via Zod schema", async () => {
+      mockComplete.mockResolvedValue({
+        content: JSON.stringify([
+          { action: "create", content: "target_id 是数字", claim_type: "fact", reason: "test", confidence: 0.8, target_id: 123 },
+          { action: "create", content: "conflicts_with 不是数组", claim_type: "fact", reason: "test", confidence: 0.8, conflicts_with: "not-array" },
+          { action: "create", content: "source_message_ids 不是数组", claim_type: "fact", reason: "test", confidence: 0.8, source_message_ids: "msg-1" },
+          { action: "create", content: "合法带可选字段", claim_type: "fact", reason: "test", confidence: 0.8, target_id: "mem-1", conflicts_with: ["mem-2"] },
+        ]),
+        usage: { input_tokens: 100, output_tokens: 80 },
+        model_id: "deepseek-chat",
+        provider_id: "anthropic",
+        finish_reason: "end_turn",
+      });
+
+      const res = await app.request("/maintenance/run", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ conversation_id: "conv-maint-test", task_type: "digest" }),
+      });
+
+      const data = (await res.json()).data;
+      expect(data.accepted.length).toBe(1);
+      expect(data.accepted[0].content).toBe("合法带可选字段");
+    });
+
     it("drops items with invalid action, claim_type, empty content, or empty reason", async () => {
       mockComplete.mockResolvedValue({
         content: JSON.stringify([
@@ -296,6 +333,29 @@ describe("Maintenance API", () => {
       // Verify DB updated
       const rows = await db.select().from(schema.maintenanceProposals).where(sql`id = 'mp-review'`);
       expect(rows[0].status).toBe("approved");
+    });
+
+    it("creates audit record atomically with status change", async () => {
+      const now = new Date().toISOString();
+      await db.insert(schema.maintenanceProposals).values({
+        id: "mp-atomic", conversation_id: "conv-maint-test", action: "create", content: "atomic test", claim_type: "fact", reason: "test", confidence: 0.9, status: "pending", proposer_model: "test", created_at: now,
+      });
+
+      const res = await app.request("/maintenance/proposals/mp-atomic/review", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ decision: "approved", reason: "verified" }),
+      });
+
+      expect(res.status).toBe(200);
+
+      const rows = await db.select().from(schema.maintenanceProposals).where(sql`id = 'mp-atomic'`);
+      expect(rows[0].status).toBe("approved");
+
+      const audits = await db.select().from(schema.maintenanceAudit).where(sql`proposal_id = 'mp-atomic'`);
+      expect(audits.length).toBe(1);
+      expect(audits[0].decision_reason).toBe("verified");
+      expect(audits[0].actor_model_id).toBe("user");
     });
 
     it("rejects already-reviewed proposal", async () => {

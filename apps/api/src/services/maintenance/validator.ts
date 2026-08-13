@@ -1,6 +1,23 @@
+import { z } from "zod";
+import { maintenanceActionSchema, claimTypeSchema } from "@lamplight/contracts";
+
+export const rawProposalItemSchema = z.object({
+  action: maintenanceActionSchema,
+  content: z.string().min(1),
+  claim_type: claimTypeSchema,
+  reason: z.string().min(1),
+  confidence: z.number().min(0).max(1),
+  target_id: z.string().optional(),
+  conflicts_with: z.array(z.string()).optional(),
+  source_message_ids: z.array(z.string()).optional(),
+  evidence_excerpt: z.string().optional(),
+});
+
+export type RawProposalItem = z.infer<typeof rawProposalItemSchema>;
+
 const FIRST_PERSON_PATTERNS = [
-  /(?<!自|忘|无|舍)我(?!们)/,
-  /\bI\b/,
+  /(?<!自|忘|无|舍)我/,
+  /\bI\b/i,
   /\bI'/i,
 ];
 
@@ -15,18 +32,6 @@ export function validateThirdPerson(content: string): {
     }
   }
   return { valid: true };
-}
-
-export interface RawProposalItem {
-  action: string;
-  content: string;
-  claim_type: string;
-  reason: string;
-  confidence: number;
-  target_id?: string;
-  conflicts_with?: string[];
-  source_message_ids?: string[];
-  evidence_excerpt?: string;
 }
 
 export function validateMaintenanceOutput(

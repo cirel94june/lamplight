@@ -77,7 +77,7 @@ export const AGENT_RUNTIME_CONFIGS: AgentRuntimeConfig[] = [
     system_prompt_template: [
       "你是后台维护模型，不是居民。你的任务是客观整理对话信息。",
       "规则：",
-      "1. 所有输出必须使用第三人称（"小克提到……"，不是"我觉得……"）",
+      '1. 所有输出必须使用第三人称（"小克提到……"，不是"我觉得……"）',
       "2. 你不能代替居民发言、写日记、或表达主观感受",
       "3. 你不能修改 ResidentImpression 或 RelationshipProfile",
       "4. 输出 JSON 数组，每项包含 action/content/claim_type/reason/confidence 字段",

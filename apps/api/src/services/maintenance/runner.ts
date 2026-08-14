@@ -1,11 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import { maintenanceActionSchema, claimTypeSchema } from "@lamplight/contracts";
 import type { AIGateway, MaintenanceTask } from "@lamplight/contracts";
 import * as schema from "../../db/schema.js";
 import { ConversationRepository } from "../runtime/conversation-repository.js";
-import { validateMaintenanceOutput, type RawProposalItem } from "./validator.js";
+import { validateMaintenanceOutput, rawProposalItemSchema, type RawProposalItem } from "./validator.js";
 
 const MAINTENANCE_AGENT_ID = "maintenance";
 
@@ -175,17 +174,12 @@ export class MaintenanceRunner {
       if (!jsonMatch) return [];
       const parsed = JSON.parse(jsonMatch[0]);
       if (!Array.isArray(parsed)) return [];
-      return parsed.filter(
-        (item: unknown): item is RawProposalItem => {
-          if (typeof item !== "object" || item === null) return false;
-          const obj = item as Record<string, unknown>;
-          if (!("action" in obj && "content" in obj && "claim_type" in obj && "reason" in obj && "confidence" in obj)) return false;
-          if (!maintenanceActionSchema.safeParse(obj.action).success) return false;
-          if (!claimTypeSchema.safeParse(obj.claim_type).success) return false;
-          if (typeof obj.confidence !== "number" || obj.confidence < 0 || obj.confidence > 1) return false;
-          return true;
-        },
-      );
+      const results: RawProposalItem[] = [];
+      for (const item of parsed) {
+        const result = rawProposalItemSchema.safeParse(item);
+        if (result.success) results.push(result.data);
+      }
+      return results;
     } catch {
       return [];
     }

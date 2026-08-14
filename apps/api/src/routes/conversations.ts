@@ -163,7 +163,7 @@ conversations.post("/", async (c) => {
       ),
     );
 
-  const participantAiIds = presenceRows.map((r) => r.ai_id);
+  const participantAiIds = presenceRows.map((r) => r.ai_id).filter((id) => id !== "maintenance");
   const now = new Date().toISOString();
   const id = `conv_${randomUUID()}`;
 

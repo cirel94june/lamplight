@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
-import { db } from "../db/index.js";
+import { eq } from "drizzle-orm";
+import { db, client } from "../db/index.js";
 import * as schema from "../db/schema.js";
 import { initGateway } from "../services/gateway/index.js";
 import { ConversationRepository } from "../services/runtime/conversation-repository.js";
@@ -77,42 +77,41 @@ maintenance.post("/proposals/:id/review", async (c) => {
     return c.json({ ok: false, error: "decision must be 'approved' or 'rejected'" }, 400);
   }
 
-  const now = new Date().toISOString();
-
-  const updateResult = await db.run(
-    sql`UPDATE maintenance_proposals SET status = ${body.decision} WHERE id = ${proposalId} AND status = 'pending'`,
-  );
-
-  if (updateResult.rowsAffected === 0) {
-    const existing = await db
-      .select({ status: schema.maintenanceProposals.status })
-      .from(schema.maintenanceProposals)
-      .where(eq(schema.maintenanceProposals.id, proposalId))
-      .limit(1);
-
-    if (existing.length === 0) {
-      return c.json({ ok: false, error: "Proposal not found" }, 404);
-    }
-    return c.json({ ok: false, error: `Proposal already ${existing[0].status}` }, 409);
-  }
-
-  const reviewed = await db
+  const existing = await db
     .select()
     .from(schema.maintenanceProposals)
     .where(eq(schema.maintenanceProposals.id, proposalId))
     .limit(1);
 
-  await db.insert(schema.maintenanceAudit).values({
-    id: `ma_${randomUUID()}`,
-    proposal_id: proposalId,
-    action: reviewed[0].action,
-    target_id: reviewed[0].target_id,
-    decision_reason: body.reason ?? `User ${body.decision}`,
-    actor_model_id: "user",
-    actor_provider_id: "user",
-    auto_executed: 0,
-    created_at: now,
-  });
+  if (existing.length === 0) {
+    return c.json({ ok: false, error: "Proposal not found" }, 404);
+  }
+
+  if (existing[0].status !== "pending") {
+    return c.json({ ok: false, error: `Proposal already ${existing[0].status}` }, 409);
+  }
+
+  const now = new Date().toISOString();
+  const auditId = `ma_${randomUUID()}`;
+  const decisionReason = body.reason ?? `User ${body.decision}`;
+
+  const results = await client.batch(
+    [
+      {
+        sql: "UPDATE maintenance_proposals SET status = ? WHERE id = ? AND status = 'pending'",
+        args: [body.decision, proposalId],
+      },
+      {
+        sql: "INSERT INTO maintenance_audit (id, proposal_id, action, target_id, decision_reason, actor_model_id, actor_provider_id, auto_executed, created_at) SELECT ?, ?, ?, ?, ?, 'user', 'user', 0, ? WHERE changes() > 0",
+        args: [auditId, proposalId, existing[0].action, existing[0].target_id ?? null, decisionReason, now],
+      },
+    ],
+    "write",
+  );
+
+  if (results[0].rowsAffected === 0) {
+    return c.json({ ok: false, error: `Proposal already ${existing[0].status}` }, 409);
+  }
 
   return c.json({
     ok: true,

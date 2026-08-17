@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, and, gte, lte, sql } from "drizzle-orm";
 import { db, client } from "../db/index.js";
 import * as schema from "../db/schema.js";
 import { initGateway } from "../services/gateway/index.js";
@@ -43,6 +43,60 @@ maintenance.post("/run", async (c) => {
     const message = err instanceof Error ? err.message : "Maintenance run failed";
     return c.json({ ok: false, error: message }, 500);
   }
+});
+
+maintenance.post("/generate-digest", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const since = body?.since ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const until = body?.until ?? new Date().toISOString();
+  const sceneFilter = body?.scene_id;
+
+  const scenes = await db
+    .select()
+    .from(schema.scenes)
+    .where(eq(schema.scenes.type, "room"));
+
+  const targetScenes = sceneFilter
+    ? scenes.filter((s) => s.scene_id === sceneFilter)
+    : scenes;
+
+  if (targetScenes.length === 0) {
+    return c.json({ ok: false, error: "No public rooms found" }, 404);
+  }
+
+  const allResults: Array<{ scene_id: string; conversation_id: string; accepted: unknown[]; rejected: unknown[] }> = [];
+
+  for (const scene of targetScenes) {
+    const convs = await db
+      .select()
+      .from(schema.conversations)
+      .where(
+        and(
+          eq(schema.conversations.scene_id, scene.scene_id),
+          gte(schema.conversations.updated_at, since),
+          lte(schema.conversations.created_at, until),
+        ),
+      );
+
+    for (const conv of convs) {
+      try {
+        const result = await runner.run({
+          conversation_id: conv.id,
+          task_type: "digest",
+        });
+        allResults.push({
+          scene_id: scene.scene_id,
+          conversation_id: conv.id,
+          accepted: result.accepted,
+          rejected: result.rejected,
+        });
+      } catch {
+        // skip conversations that fail
+      }
+    }
+  }
+
+  return c.json({ ok: true, data: { since, until, results: allResults } });
 });
 
 maintenance.get("/proposals", async (c) => {
@@ -111,6 +165,36 @@ maintenance.post("/proposals/:id/review", async (c) => {
 
   if (results[0].rowsAffected === 0) {
     return c.json({ ok: false, error: `Proposal already ${existing[0].status}` }, 409);
+  }
+
+  if (body.decision === "approved" && existing[0].task_type === "digest") {
+    const conv = await db
+      .select()
+      .from(schema.conversations)
+      .where(eq(schema.conversations.id, existing[0].conversation_id))
+      .limit(1);
+
+    const msgRange = await db
+      .select({
+        earliest: sql<string>`MIN(created_at)`,
+        latest: sql<string>`MAX(created_at)`,
+      })
+      .from(schema.messages)
+      .where(eq(schema.messages.conversation_id, existing[0].conversation_id));
+
+    await db.insert(schema.householdDigests).values({
+      id: `hd_${randomUUID()}`,
+      proposal_id: proposalId,
+      scene_id: conv[0]?.scene_id ?? "unknown",
+      conversation_id: existing[0].conversation_id,
+      content: existing[0].content,
+      claim_type: existing[0].claim_type,
+      participant_ai_ids: conv[0]?.participant_ai_ids ?? null,
+      period_start: msgRange[0]?.earliest ?? now,
+      period_end: msgRange[0]?.latest ?? now,
+      proposer_model: existing[0].proposer_model,
+      created_at: now,
+    });
   }
 
   return c.json({

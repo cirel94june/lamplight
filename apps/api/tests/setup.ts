@@ -131,6 +131,7 @@ beforeAll(async () => {
     proposer_model TEXT NOT NULL,
     source_message_ids TEXT,
     evidence_excerpt TEXT,
+    task_type TEXT DEFAULT 'digest',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
 
@@ -143,6 +144,21 @@ beforeAll(async () => {
     actor_model_id TEXT NOT NULL,
     actor_provider_id TEXT NOT NULL,
     auto_executed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+
+  await db.run(sql`CREATE TABLE IF NOT EXISTS household_digests (
+    id TEXT PRIMARY KEY NOT NULL,
+    proposal_id TEXT,
+    scene_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    claim_type TEXT NOT NULL,
+    topic TEXT,
+    participant_ai_ids TEXT,
+    period_start TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    proposer_model TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
 

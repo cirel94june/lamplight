@@ -64,6 +64,13 @@
       "when": 1786665600000,
       "tag": "0008_clean_maintenance_participants",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1786924800000,
+      "tag": "0009_household_digests",
+      "breakpoints": true
     }
   ]
 }

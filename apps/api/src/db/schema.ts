@@ -155,6 +155,24 @@ export const maintenanceProposals = sqliteTable("maintenance_proposals", {
   proposer_model: text("proposer_model").notNull(),
   source_message_ids: text("source_message_ids", { mode: "json" }).$type<string[] | null>(),
   evidence_excerpt: text("evidence_excerpt"),
+  task_type: text("task_type").default("digest"),
+  created_at: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+export const householdDigests = sqliteTable("household_digests", {
+  id: text("id").primaryKey(),
+  proposal_id: text("proposal_id"),
+  scene_id: text("scene_id").notNull(),
+  conversation_id: text("conversation_id").notNull(),
+  content: text("content").notNull(),
+  claim_type: text("claim_type").notNull(),
+  topic: text("topic"),
+  participant_ai_ids: text("participant_ai_ids", { mode: "json" }).$type<string[] | null>(),
+  period_start: text("period_start").notNull(),
+  period_end: text("period_end").notNull(),
+  proposer_model: text("proposer_model").notNull(),
   created_at: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),

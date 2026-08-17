@@ -34,18 +34,51 @@ export function validateThirdPerson(content: string): {
   return { valid: true };
 }
 
+const SUBJECTIVE_COLLECTIVE_PATTERNS = [
+  /大家都认为/,
+  /大家都觉得/,
+  /所有人都觉得/,
+  /所有人都认为/,
+  /真正担心的是/,
+  /内心其实/,
+  /其实是在/,
+  /\beveryone thinks\b/i,
+  /\bthey all feel\b/i,
+  /\bwhat .+ really means\b/i,
+];
+
+export function validateDigestObjectivity(content: string): {
+  valid: boolean;
+  matched?: string;
+} {
+  const thirdPerson = validateThirdPerson(content);
+  if (!thirdPerson.valid) return thirdPerson;
+
+  for (const pattern of SUBJECTIVE_COLLECTIVE_PATTERNS) {
+    const match = content.match(pattern);
+    if (match) {
+      return { valid: false, matched: match[0] };
+    }
+  }
+  return { valid: true };
+}
+
 export function validateMaintenanceOutput(
   items: RawProposalItem[],
+  taskType?: string,
 ): { accepted: RawProposalItem[]; rejected: Array<{ item: RawProposalItem; reason: string }> } {
   const accepted: RawProposalItem[] = [];
   const rejected: Array<{ item: RawProposalItem; reason: string }> = [];
+  const validate = taskType === "digest" ? validateDigestObjectivity : validateThirdPerson;
 
   for (const item of items) {
-    const check = validateThirdPerson(item.content);
+    const check = validate(item.content);
     if (!check.valid) {
       rejected.push({
         item,
-        reason: `第一人称内容被拒绝: "${check.matched}"`,
+        reason: taskType === "digest"
+          ? `Digest 主观内容被拒绝: "${check.matched}"`
+          : `第一人称内容被拒绝: "${check.matched}"`,
       });
       continue;
     }

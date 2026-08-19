@@ -31,8 +31,10 @@ async function seedDigestScenario() {
   await db.run(sql`DELETE FROM scenes`);
 
   await db.insert(schema.scenes).values([
-    { scene_id: "room-living", display_name: "客厅", type: "room", prompt_weight_overrides: {} },
-    { scene_id: "room-private-lucien", display_name: "Lucien的房间", type: "private", prompt_weight_overrides: {} },
+    { scene_id: "room-living", display_name: "客厅", type: "room", scope: "shared", prompt_weight_overrides: {} },
+    { scene_id: "room-private-lucien", display_name: "Lucien的房间", type: "room", scope: "private", prompt_weight_overrides: {} },
+    { scene_id: "room-ceci-bedroom", display_name: "小猫卧室", type: "room", scope: "private", prompt_weight_overrides: {} },
+    { scene_id: "room-counseling", display_name: "心理咨询室", type: "room", scope: "private", prompt_weight_overrides: {} },
   ]);
 
   await db.insert(schema.agentProfiles).values([
@@ -79,6 +81,24 @@ async function seedDigestScenario() {
       created_at: oneHourAgo,
       updated_at: now,
     },
+    {
+      id: "conv-ceci-bedroom",
+      kind: "house_chat",
+      scene_id: "room-ceci-bedroom",
+      participant_ai_ids: ["lucien"] as any,
+      status: "active",
+      created_at: oneHourAgo,
+      updated_at: now,
+    },
+    {
+      id: "conv-counseling",
+      kind: "house_chat",
+      scene_id: "room-counseling",
+      participant_ai_ids: ["jasper"] as any,
+      status: "active",
+      created_at: oneHourAgo,
+      updated_at: now,
+    },
   ]);
 
   await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, content, context_type, context_set_by, created_at) VALUES ('msg-u1', 'conv-living', 'house_chat', 1, 'user', '今天天气真好，要不要出去走走？', 'out_of_world', 'server', ${oneHourAgo})`);
@@ -87,6 +107,8 @@ async function seedDigestScenario() {
   await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, created_at) VALUES ('msg-j1', 'conv-living', 'house_chat', 4, 'ai', 'jasper', '天气确实不错，但别忘了明天还有事。', 'out_of_world', 'server', ${now})`);
 
   await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, created_at) VALUES ('msg-priv1', 'conv-private', 'house_chat', 1, 'ai', 'lucien', '今天有点累，想安静待一会儿。', 'out_of_world', 'server', ${now})`);
+  await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, created_at) VALUES ('msg-ceci1', 'conv-ceci-bedroom', 'house_chat', 1, 'ai', 'lucien', 'Ceci 今天跟 Lucien 聊了私事。', 'out_of_world', 'server', ${now})`);
+  await db.run(sql`INSERT INTO messages (id, conversation_id, conversation_kind, seq, sender_type, sender_ai_id, content, context_type, context_set_by, created_at) VALUES ('msg-couns1', 'conv-counseling', 'house_chat', 1, 'ai', 'jasper', '咨询室里的对话。', 'out_of_world', 'server', ${now})`);
 }
 
 describe("Digest objectivity validator", () => {
@@ -151,7 +173,7 @@ describe("HouseholdDigest API", () => {
       expect(proposals[0].task_type).toBe("digest");
     });
 
-    it("excludes private room conversations", async () => {
+    it("excludes ALL private/sensitive rooms: bedrooms, counseling, private rooms", async () => {
       mockComplete.mockResolvedValue({
         content: JSON.stringify([
           { action: "create", content: "公共事实", claim_type: "fact", reason: "test", confidence: 0.9 },
@@ -171,6 +193,9 @@ describe("HouseholdDigest API", () => {
       const data = (await res.json()).data;
       const sceneIds = data.results.map((r: any) => r.scene_id);
       expect(sceneIds).not.toContain("room-private-lucien");
+      expect(sceneIds).not.toContain("room-ceci-bedroom");
+      expect(sceneIds).not.toContain("room-counseling");
+      expect(sceneIds).toContain("room-living");
     });
 
     it("rejects subjective content in digest mode", async () => {

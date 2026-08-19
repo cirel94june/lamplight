@@ -5,6 +5,7 @@ export const scenes = sqliteTable("scenes", {
   scene_id: text("scene_id").primaryKey(),
   display_name: text("display_name").notNull(),
   type: text("type").notNull(),
+  scope: text("scope").notNull().default("shared"),
   prompt_weight_overrides: text("prompt_weight_overrides", { mode: "json" })
     .$type<Record<string, number>>()
     .default({}),

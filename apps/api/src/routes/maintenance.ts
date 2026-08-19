@@ -54,7 +54,7 @@ maintenance.post("/generate-digest", async (c) => {
   const scenes = await db
     .select()
     .from(schema.scenes)
-    .where(eq(schema.scenes.type, "room"));
+    .where(eq(schema.scenes.scope, "shared"));
 
   const targetScenes = sceneFilter
     ? scenes.filter((s) => s.scene_id === sceneFilter)
@@ -149,25 +149,20 @@ maintenance.post("/proposals/:id/review", async (c) => {
   const auditId = `ma_${randomUUID()}`;
   const decisionReason = body.reason ?? `User ${body.decision}`;
 
-  const results = await client.batch(
-    [
-      {
-        sql: "UPDATE maintenance_proposals SET status = ? WHERE id = ? AND status = 'pending'",
-        args: [body.decision, proposalId],
-      },
-      {
-        sql: "INSERT INTO maintenance_audit (id, proposal_id, action, target_id, decision_reason, actor_model_id, actor_provider_id, auto_executed, created_at) SELECT ?, ?, ?, ?, ?, 'user', 'user', 0, ? WHERE changes() > 0",
-        args: [auditId, proposalId, existing[0].action, existing[0].target_id ?? null, decisionReason, now],
-      },
-    ],
-    "write",
-  );
+  const isDigestApproval = body.decision === "approved" && existing[0].task_type === "digest";
 
-  if (results[0].rowsAffected === 0) {
-    return c.json({ ok: false, error: `Proposal already ${existing[0].status}` }, 409);
-  }
+  const batchStatements: Array<{ sql: string; args: unknown[] }> = [
+    {
+      sql: "UPDATE maintenance_proposals SET status = ? WHERE id = ? AND status = 'pending'",
+      args: [body.decision, proposalId],
+    },
+    {
+      sql: "INSERT INTO maintenance_audit (id, proposal_id, action, target_id, decision_reason, actor_model_id, actor_provider_id, auto_executed, created_at) SELECT ?, ?, ?, ?, ?, 'user', 'user', 0, ? WHERE changes() > 0",
+      args: [auditId, proposalId, existing[0].action, existing[0].target_id ?? null, decisionReason, now],
+    },
+  ];
 
-  if (body.decision === "approved" && existing[0].task_type === "digest") {
+  if (isDigestApproval) {
     const conv = await db
       .select()
       .from(schema.conversations)
@@ -182,19 +177,24 @@ maintenance.post("/proposals/:id/review", async (c) => {
       .from(schema.messages)
       .where(eq(schema.messages.conversation_id, existing[0].conversation_id));
 
-    await db.insert(schema.householdDigests).values({
-      id: `hd_${randomUUID()}`,
-      proposal_id: proposalId,
-      scene_id: conv[0]?.scene_id ?? "unknown",
-      conversation_id: existing[0].conversation_id,
-      content: existing[0].content,
-      claim_type: existing[0].claim_type,
-      participant_ai_ids: conv[0]?.participant_ai_ids ?? null,
-      period_start: msgRange[0]?.earliest ?? now,
-      period_end: msgRange[0]?.latest ?? now,
-      proposer_model: existing[0].proposer_model,
-      created_at: now,
+    const digestId = `hd_${randomUUID()}`;
+    const participantJson = conv[0]?.participant_ai_ids ? JSON.stringify(conv[0].participant_ai_ids) : null;
+
+    batchStatements.push({
+      sql: "INSERT INTO household_digests (id, proposal_id, scene_id, conversation_id, content, claim_type, participant_ai_ids, period_start, period_end, proposer_model, created_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE changes() > 0",
+      args: [
+        digestId, proposalId, conv[0]?.scene_id ?? "unknown", existing[0].conversation_id,
+        existing[0].content, existing[0].claim_type, participantJson,
+        msgRange[0]?.earliest ?? now, msgRange[0]?.latest ?? now,
+        existing[0].proposer_model, now,
+      ],
     });
+  }
+
+  const results = await client.batch(batchStatements as any, "write");
+
+  if (results[0].rowsAffected === 0) {
+    return c.json({ ok: false, error: `Proposal already ${existing[0].status}` }, 409);
   }
 
   return c.json({

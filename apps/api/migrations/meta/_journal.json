@@ -71,6 +71,13 @@
       "when": 1786924800000,
       "tag": "0009_household_digests",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1787184000000,
+      "tag": "0010_scene_scope",
+      "breakpoints": true
     }
   ]
 }

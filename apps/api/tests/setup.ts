@@ -7,6 +7,7 @@ beforeAll(async () => {
     scene_id TEXT PRIMARY KEY NOT NULL,
     display_name TEXT NOT NULL,
     type TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'shared',
     prompt_weight_overrides TEXT DEFAULT '{}',
     max_participants INTEGER,
     furniture_slots INTEGER,

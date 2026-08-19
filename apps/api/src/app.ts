@@ -7,6 +7,7 @@ import { conversations } from "./routes/conversations.js";
 import { assets, assetsPublic } from "./routes/assets.js";
 import { settings } from "./routes/settings.js";
 import { maintenance } from "./routes/maintenance.js";
+import { householdDigest } from "./routes/household-digest.js";
 
 const app = new Hono();
 
@@ -23,5 +24,6 @@ app.route("/conversations", conversations);
 app.route("/assets", assets);
 app.route("/settings", settings);
 app.route("/maintenance", maintenance);
+app.route("/household-digest", householdDigest);
 
 export { app };

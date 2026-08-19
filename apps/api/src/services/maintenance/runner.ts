@@ -45,7 +45,7 @@ export class MaintenanceRunner {
     });
 
     const rawItems = this.parseOutput(response.content);
-    const { accepted, rejected } = validateMaintenanceOutput(rawItems);
+    const { accepted, rejected } = validateMaintenanceOutput(rawItems, task.task_type);
 
     const result: MaintenanceRunResult = { accepted: [], rejected: [] };
 
@@ -67,6 +67,7 @@ export class MaintenanceRunner {
         proposer_model: binding.model_id,
         source_message_ids: item.source_message_ids ?? null,
         evidence_excerpt: item.evidence_excerpt ?? null,
+        task_type: task.task_type,
         created_at: now,
       });
 
@@ -158,7 +159,7 @@ export class MaintenanceRunner {
   private getTaskInstruction(taskType: string): string {
     switch (taskType) {
       case "digest":
-        return "任务：提取对话中的关键事实和事件，生成摘要候选。每条候选包含 action（通常 create）、content（第三人称描述）、claim_type（fact/observation/hypothesis）、reason（为什么值得记录）、confidence（0-1）。";
+        return "任务：提取对话中的公共事实和事件，生成 HouseholdDigest 候选。只记录客观发生的事：谁说了什么、讨论了什么话题、达成了什么结论。禁止写入主观解释（如『大家都认为……』『X 真正担心的是……』）。每条候选包含 action（通常 create）、content（第三人称客观描述）、claim_type（fact/observation）、reason（为什么值得记录）、confidence（0-1）。";
       case "classify":
         return "任务：对对话中提到的信息进行分类（info_type），识别哪些是事实、观察、假设。每条候选包含 action/content/claim_type/reason/confidence。";
       case "conflict_detect":

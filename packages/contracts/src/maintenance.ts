@@ -55,6 +55,27 @@ export const maintenanceProposalSchema = z
   });
 export type MaintenanceProposal = z.infer<typeof maintenanceProposalSchema>;
 
+/**
+ * 公共事实摘要——HouseholdDigest 是一等实体。
+ * 只存公共事实（"客厅里 Cloudy 和 Jasper 讨论了 API"），
+ * 不存主观理解（红线 #11）。
+ */
+export const householdDigestSchema = z.object({
+  id: z.string(),
+  proposal_id: z.string().optional(),
+  scene_id: z.string(),
+  conversation_id: z.string(),
+  content: z.string().min(1),
+  claim_type: claimTypeSchema,
+  topic: z.string().optional(),
+  participant_ai_ids: z.array(z.string()).optional(),
+  period_start: z.string(),
+  period_end: z.string(),
+  proposer_model: z.string(),
+  created_at: z.string(),
+});
+export type HouseholdDigest = z.infer<typeof householdDigestSchema>;
+
 /** 审计记录——所有维护动作必须留痕（红线 #16）。 */
 export const maintenanceAuditEntrySchema = z.object({
   id: z.string(),

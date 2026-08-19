@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, and, gte, lte, sql } from "drizzle-orm";
 import { db, client } from "../db/index.js";
 import * as schema from "../db/schema.js";
 import { initGateway } from "../services/gateway/index.js";
@@ -43,6 +43,60 @@ maintenance.post("/run", async (c) => {
     const message = err instanceof Error ? err.message : "Maintenance run failed";
     return c.json({ ok: false, error: message }, 500);
   }
+});
+
+maintenance.post("/generate-digest", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const since = body?.since ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const until = body?.until ?? new Date().toISOString();
+  const sceneFilter = body?.scene_id;
+
+  const scenes = await db
+    .select()
+    .from(schema.scenes)
+    .where(eq(schema.scenes.scope, "shared"));
+
+  const targetScenes = sceneFilter
+    ? scenes.filter((s) => s.scene_id === sceneFilter)
+    : scenes;
+
+  if (targetScenes.length === 0) {
+    return c.json({ ok: false, error: "No public rooms found" }, 404);
+  }
+
+  const allResults: Array<{ scene_id: string; conversation_id: string; accepted: unknown[]; rejected: unknown[] }> = [];
+
+  for (const scene of targetScenes) {
+    const convs = await db
+      .select()
+      .from(schema.conversations)
+      .where(
+        and(
+          eq(schema.conversations.scene_id, scene.scene_id),
+          gte(schema.conversations.updated_at, since),
+          lte(schema.conversations.created_at, until),
+        ),
+      );
+
+    for (const conv of convs) {
+      try {
+        const result = await runner.run({
+          conversation_id: conv.id,
+          task_type: "digest",
+        });
+        allResults.push({
+          scene_id: scene.scene_id,
+          conversation_id: conv.id,
+          accepted: result.accepted,
+          rejected: result.rejected,
+        });
+      } catch {
+        // skip conversations that fail
+      }
+    }
+  }
+
+  return c.json({ ok: true, data: { since, until, results: allResults } });
 });
 
 maintenance.get("/proposals", async (c) => {
@@ -95,19 +149,49 @@ maintenance.post("/proposals/:id/review", async (c) => {
   const auditId = `ma_${randomUUID()}`;
   const decisionReason = body.reason ?? `User ${body.decision}`;
 
-  const results = await client.batch(
-    [
-      {
-        sql: "UPDATE maintenance_proposals SET status = ? WHERE id = ? AND status = 'pending'",
-        args: [body.decision, proposalId],
-      },
-      {
-        sql: "INSERT INTO maintenance_audit (id, proposal_id, action, target_id, decision_reason, actor_model_id, actor_provider_id, auto_executed, created_at) SELECT ?, ?, ?, ?, ?, 'user', 'user', 0, ? WHERE changes() > 0",
-        args: [auditId, proposalId, existing[0].action, existing[0].target_id ?? null, decisionReason, now],
-      },
-    ],
-    "write",
-  );
+  const isDigestApproval = body.decision === "approved" && existing[0].task_type === "digest";
+
+  const batchStatements: Array<{ sql: string; args: unknown[] }> = [
+    {
+      sql: "UPDATE maintenance_proposals SET status = ? WHERE id = ? AND status = 'pending'",
+      args: [body.decision, proposalId],
+    },
+    {
+      sql: "INSERT INTO maintenance_audit (id, proposal_id, action, target_id, decision_reason, actor_model_id, actor_provider_id, auto_executed, created_at) SELECT ?, ?, ?, ?, ?, 'user', 'user', 0, ? WHERE changes() > 0",
+      args: [auditId, proposalId, existing[0].action, existing[0].target_id ?? null, decisionReason, now],
+    },
+  ];
+
+  if (isDigestApproval) {
+    const conv = await db
+      .select()
+      .from(schema.conversations)
+      .where(eq(schema.conversations.id, existing[0].conversation_id))
+      .limit(1);
+
+    const msgRange = await db
+      .select({
+        earliest: sql<string>`MIN(created_at)`,
+        latest: sql<string>`MAX(created_at)`,
+      })
+      .from(schema.messages)
+      .where(eq(schema.messages.conversation_id, existing[0].conversation_id));
+
+    const digestId = `hd_${randomUUID()}`;
+    const participantJson = conv[0]?.participant_ai_ids ? JSON.stringify(conv[0].participant_ai_ids) : null;
+
+    batchStatements.push({
+      sql: "INSERT INTO household_digests (id, proposal_id, scene_id, conversation_id, content, claim_type, participant_ai_ids, period_start, period_end, proposer_model, created_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE changes() > 0",
+      args: [
+        digestId, proposalId, conv[0]?.scene_id ?? "unknown", existing[0].conversation_id,
+        existing[0].content, existing[0].claim_type, participantJson,
+        msgRange[0]?.earliest ?? now, msgRange[0]?.latest ?? now,
+        existing[0].proposer_model, now,
+      ],
+    });
+  }
+
+  const results = await client.batch(batchStatements as any, "write");
 
   if (results[0].rowsAffected === 0) {
     return c.json({ ok: false, error: `Proposal already ${existing[0].status}` }, 409);

@@ -18,6 +18,7 @@ for (const room of ROOMS) {
       scene_id: room.scene_id,
       display_name: room.display_name,
       type: room.type,
+      scope: room.scope ?? "shared",
       prompt_weight_overrides: room.prompt_weight_overrides,
       max_participants: room.max_participants ?? null,
       furniture_slots: room.furniture_slots ?? null,
@@ -28,6 +29,7 @@ for (const room of ROOMS) {
       set: {
         display_name: room.display_name,
         type: room.type,
+        scope: room.scope ?? "shared",
         prompt_weight_overrides: room.prompt_weight_overrides,
         max_participants: room.max_participants ?? null,
         furniture_slots: room.furniture_slots ?? null,
